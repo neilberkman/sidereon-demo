@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sidereon · reference-validated GNSS + astrodynamics, in five languages</title>
+    <meta
+      name="description"
+      content="One reference-validated GNSS and astrodynamics engine. A Rust core with first-class interfaces in Rust, Python, C, Elixir, and WebAssembly."
+    />
+  </head>
+  <body>
+    <div id="bg-grid" aria-hidden="true"></div>
+    <div id="bg-glow" aria-hidden="true"></div>
+    <div id="scanlines" aria-hidden="true"></div>
+    <div id="grain" aria-hidden="true"></div>
+
+    <!-- Persistent, featured live globe behind the whole page. -->
+    <div id="globe-host"></div>
+
+    <!-- Boot overlay: brief instrument warm-up, then it clears to the live globe. -->
+    <div id="boot">
+      <div class="boot-inner">
+        <div class="boot-title">SIDEREON</div>
+        <div class="boot-sub">GNSS + ASTRODYNAMICS ENGINE · RUST CORE · FIVE LANGUAGES</div>
+        <pre id="boot-log"></pre>
+      </div>
+    </div>
+
+    <!-- Slim top bar: identity + section nav + a little live telemetry. -->
+    <header id="hud">
+      <div class="hud-group hud-left">
+        <a class="brand" href="#top">SIDEREON</a>
+        <span class="ver">v0.8</span>
+        <span class="badge" id="wasm-badge">WASM · COLD</span>
+      </div>
+      <nav class="hud-group hud-center">
+        <a class="nav-link" href="#live">Live</a>
+        <a class="nav-link" href="#labs">Lab</a>
+        <a class="nav-link" href="#interfaces">Interfaces</a>
+        <a class="nav-link" href="#capabilities">Capabilities</a>
+        <a class="nav-link" href="#validation">Validation</a>
+      </nav>
+      <div class="hud-group hud-right">
+        <span class="telem"><span class="label">UTC</span><span class="value clock" id="utc-clock">--:--:--</span></span>
+        <span class="telem"><span class="label">SATS</span><span class="value" id="sat-count">---</span></span>
+        <a class="nav-link ghub" href="https://github.com/neilberkman/sidereon" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <!-- =====================================================================
+           1 · HERO — split: the message (left) beside the live engine (right)
+           ===================================================================== -->
+      <section class="hero" id="hero">
+        <div class="hero-split">
+          <div class="hero-copy">
+            <div class="eyebrow">REFERENCE-VALIDATED GNSS + ASTRODYNAMICS ENGINE</div>
+            <h1 class="hero-h1">
+              <span class="l1">GNSS and astrodynamics primitives.</span>
+              <span class="l2">Rust-fast, native to your language.</span>
+            </h1>
+            <p class="hero-sub">
+              A Rust core for SGP4, SPP/RTK/PPP, frames and time, ionosphere, RINEX, and
+              conjunction, checked against Vallado, Skyfield, IGS, and IERS, with native
+              interfaces in <b>Python</b>, <b>C</b>, <b>Elixir</b>, and <b>WebAssembly</b>.
+            </p>
+
+            <div class="hero-install">
+              <div class="lang-switch" id="hero-lang-tabs" role="tablist" aria-label="Install language"></div>
+              <div class="install-line">
+                <code id="hero-install-cmd">cargo add sidereon</code>
+                <span class="install-from" id="hero-install-from">crates.io</span>
+              </div>
+            </div>
+
+            <div class="hero-cta-row">
+              <a class="btn btn-primary" href="https://github.com/neilberkman/sidereon" target="_blank" rel="noopener">View on GitHub</a>
+              <a class="btn btn-ghost" href="#interfaces">See it in your language</a>
+            </div>
+
+            <div class="hero-foot">
+              <span id="hero-foot-sats">propagating the live constellation</span> · GPS · Galileo · GLONASS · BeiDou
+            </div>
+          </div>
+
+          <!-- The live engine, running client-side: the globe behind the page shows
+               through this framed stage, with a live SPP readout over it. -->
+          <div class="hero-stage">
+            <div class="hero-stage-frame">
+              <div class="stage-top">
+                <span class="stage-live"><span class="lv-dot"></span>WASM LIVE · RUNNING IN THIS TAB</span>
+                <span class="net-pill" id="hero-net-pill">NET 0</span>
+              </div>
+              <div class="stage-readout" id="hero-readout">
+                <div class="hr-label">LIVE SPP SOLVE · IGS STATION ABMF (GUADELOUPE) · IN-BROWSER</div>
+                <div class="hr-pos"><span class="hr-coord muted">computing first fix…</span></div>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </div>
+            <div class="stage-caption">The whole engine, running client-side in your browser right now.</div>
+          </div>
+        </div>
+        <a class="scroll-cue" href="#live">TRACK THE LIVE CONSTELLATION</a>
+      </section>
+
+      <!-- =====================================================================
+           2 · LIVE DEMO — the WASM interface, running in this tab
+           ===================================================================== -->
+      <section class="section open" id="live">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="kicker">LIVE · WEBASSEMBLY INTERFACE</span>
+            <h2>And the whole engine runs in your browser.</h2>
+            <p class="dek">
+              Everything below is the same core compiled to WebAssembly, executing client-side in
+              this tab. Drag the globe, drop an observer, run the solve. Maximize any panel for the
+              full detail and the underlying calculations. After load there are zero server calls.
+            </p>
+          </div>
+
+          <!-- FEATURED: the observer, paired. The single shared globe is panned
+               into the LEFT pane (it shows through this transparent stage, like
+               the hero); clicking it drops an observer and the real-time skyplot
+               on the RIGHT updates immediately beside it. Every dot is a real
+               satellite; every arc is its real computed pass. -->
+          <div class="observer-pair" id="observer-pair">
+            <!-- LEFT: the live globe, through a transparent stage. Drags and
+                 clicks fall through to the globe scene behind the page. -->
+            <div class="live-stage" id="live-stage">
+              <div class="live-stage-frame">
+                <div class="stage-top">
+                  <span class="stage-live"><span class="lv-dot"></span>LIVE GLOBE · CLICK TO SET OBSERVER</span>
+                  <span class="net-pill" id="live-net-pill">NET 0</span>
+                </div>
+                <div class="stage-readout">
+                  <div class="hr-label">OBSERVER</div>
+                  <div class="obs-coords" id="live-obs-coords">CLICK THE GLOBE TO DROP AN OBSERVER</div>
+                  <div class="hr-hint">drag to orbit · + / − to zoom · click to drop an observer</div>
+                </div>
+                <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+              </div>
+              <div class="stage-caption">The live constellation, propagated client-side. Click the globe to set the observer for the skyplot beside it.</div>
+            </div>
+
+            <!-- RIGHT: the live skyplot for that observer. -->
+            <section class="panel live-panel sky-feature" id="observer-panel">
+              <div class="panel-head">
+                <span class="dot"></span>OBSERVER · LIVE SKYPLOT
+                <span class="sky-tag">REAL-TIME AZ / EL · TOPOCENTRIC LOOK ANGLES</span>
+                <button class="maximize" data-panel="sky" title="Expand" aria-label="Expand skyplot">⤢</button>
+              </div>
+              <div class="panel-body sky-feature-body">
+                <div class="sky-canvas-wrap">
+                  <canvas id="skyplot" class="skyplot skyplot-lg"></canvas>
+                </div>
+                <div class="sky-side">
+                  <div class="obs-coords" id="obs-coords">CLICK THE GLOBE TO SET AN OBSERVER</div>
+                  <div class="obs-stats" id="obs-stats"></div>
+                  <div class="subhead">NEXT PASSES · 6H</div>
+                  <div class="pass-list" id="pass-list"><div class="muted">awaiting observer</div></div>
+                  <div class="sky-foot">SGP4 propagation to current UTC, then topocentric az / el from the observer. Arcs are each satellite's real pass over ±45 min.</div>
+                </div>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+          </div>
+
+          <div class="live-grid">
+            <!-- SPP solve -->
+            <section class="panel live-panel" id="solve-panel">
+              <div class="panel-head">
+                <span class="dot amber"></span>SOLVE · REAL IGS STATION ABMF (GUADELOUPE)
+                <span class="net-pill" id="net-pill" title="HTTP requests since the page finished loading">NET 0</span>
+                <button class="maximize" data-panel="solve" title="Expand" aria-label="Expand solve panel">⤢</button>
+              </div>
+              <div class="panel-body">
+                <div class="hero-headline solve-headline" id="solve-headline">
+                  <span class="muted">computing first fix…</span>
+                </div>
+                <div class="hero-llh" id="solve-llh"></div>
+                <div class="trace" id="solve-trace">
+                  <span class="tr-node">RINEX OBS + BROADCAST NAV</span><span class="tr-arrow">→</span><span class="tr-node engine">solveBroadcast() · Rust→WASM</span><span class="tr-arrow">→</span><span class="tr-node">ECEF → LLH</span>
+                </div>
+                <div class="subhead">CONFIGURE THE SOLVE · each change re-runs the real WASM fix</div>
+                <div class="solve-controls">
+                  <div class="ctl">
+                    <span class="ctl-label">ATMOSPHERE CORRECTIONS</span>
+                    <div class="seg" id="solve-corr" role="group" aria-label="Correction set">
+                      <button type="button" class="seg-btn" data-corr="none">NONE</button>
+                      <button type="button" class="seg-btn" data-corr="iono">IONO</button>
+                      <button type="button" class="seg-btn" data-corr="tropo">TROPO</button>
+                      <button type="button" class="seg-btn is-on" data-corr="both">BOTH</button>
+                    </div>
+                    <span class="ctl-hint">Klobuchar ionosphere · Saastamoinen troposphere</span>
+                  </div>
+                  <div class="ctl">
+                    <span class="ctl-label">ELEVATION MASK <b id="mask-val">10°</b></span>
+                    <input type="range" class="slider" id="solve-mask" min="0" max="30" step="1" value="10" aria-label="Elevation mask, degrees" />
+                    <span class="ctl-hint" id="solve-used">satellites above the mask feed the fix</span>
+                  </div>
+                </div>
+                <div class="subhead">RAW VS ACTIVE CONFIG · same recorded multi-GNSS epoch</div>
+                <div class="compare" id="solve-compare"></div>
+                <div class="compare-note" id="compare-note"></div>
+                <button id="solve-btn" class="btn">RUN SOLVE AGAIN</button>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+
+            <!-- Constellation legend -->
+            <section class="panel live-panel" id="legend-panel">
+              <div class="panel-head">
+                <span class="dot"></span>CONSTELLATION
+                <button class="maximize" data-panel="globe" title="Expand" aria-label="Expand globe view">⤢</button>
+              </div>
+              <div class="panel-body" id="legend-body"></div>
+              <div class="term-ctl">
+                <label class="toggle term-toggle"><input type="checkbox" id="term-toggle" /><span></span></label>
+                <span class="term-label">DAY / NIGHT TERMINATOR</span>
+                <span class="term-readout" id="term-readout">sub-solar point off</span>
+              </div>
+              <div class="panel-foot" id="legend-foot">TLE · CELESTRAK</div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+
+            <!-- IONEX TEC -->
+            <section class="panel live-panel" id="tec-panel">
+              <div class="panel-head">
+                <span class="dot"></span>IONEX · VERTICAL TEC
+                <label class="toggle"><input type="checkbox" id="tec-toggle" /><span></span></label>
+                <button class="maximize" data-panel="tec" title="Expand" aria-label="Expand TEC map">⤢</button>
+              </div>
+              <div class="panel-body">
+                <canvas id="tec-map" class="tec-map"></canvas>
+                <div class="tec-scale" id="tec-scale"></div>
+                <div class="tec-stats" id="tec-stats">global VTEC map idle</div>
+                <div class="slant-out" id="slant-out"></div>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+          </div>
+          <div class="globe-hint">Drag to orbit · + / − to zoom · click the globe to set an observer</div>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           2b · ASTRODYNAMICS LAB — interactive engine demos
+           ===================================================================== -->
+      <section class="section band" id="labs">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="kicker">ASTRODYNAMICS · INTERACTIVE</span>
+            <h2>Drive the engine yourself.</h2>
+            <p class="dek">
+              Three more calculations, each run live in this tab against the real constellation:
+              a global coverage map, a close-approach screen between any two satellites, and orbit
+              determination from three position sightings. All client-side, zero server calls.
+            </p>
+          </div>
+
+          <div class="labs-grid">
+            <!-- COVERAGE heat map -->
+            <section class="panel live-panel" id="coverage-panel">
+              <div class="panel-head">
+                <span class="dot"></span>COVERAGE · SATELLITES IN VIEW
+                <span class="net-pill" id="coverage-net-pill">NET 0</span>
+              </div>
+              <div class="panel-body">
+                <div class="subhead">VISIBLE-SATELLITE COUNT ACROSS THE GLOBE · NOW</div>
+                <canvas id="coverage-map" class="tec-map"></canvas>
+                <div class="tec-scale" id="coverage-scale"></div>
+                <div class="tec-stats" id="coverage-stats">grid idle</div>
+                <div class="ctl">
+                  <span class="ctl-label">ELEVATION MASK <b id="coverage-mask-val">10°</b></span>
+                  <input type="range" class="slider" id="coverage-mask" min="0" max="30" step="1" value="10" aria-label="Coverage elevation mask, degrees" />
+                  <span class="ctl-hint">a satellite counts only above this elevation</span>
+                </div>
+                <button id="coverage-btn" class="btn">COMPUTE COVERAGE</button>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+
+            <!-- CONJUNCTION / TCA -->
+            <section class="panel live-panel" id="conj-panel">
+              <div class="panel-head">
+                <span class="dot amber"></span>CONJUNCTION · CLOSEST APPROACH
+                <span class="net-pill" id="conj-net-pill">NET 0</span>
+              </div>
+              <div class="panel-body">
+                <div class="subhead">SCREEN ONE SATELLITE AGAINST THE WHOLE CONSTELLATION · ONE BATCHED CALL</div>
+                <div class="lab-field">
+                  <label for="conj-a">PRIMARY</label>
+                  <select id="conj-a" class="lab-select"></select>
+                </div>
+                <div class="lab-field">
+                  <label for="conj-window">WINDOW</label>
+                  <select id="conj-window" class="lab-select">
+                    <option value="24" selected>next 24 hours</option>
+                    <option value="72">next 3 days</option>
+                    <option value="168">next 7 days</option>
+                  </select>
+                </div>
+                <button id="conj-btn" class="btn">SCREEN CONSTELLATION</button>
+                <div class="lab-out" id="conj-out"><div class="muted">pick a satellite and screen it against the fleet</div></div>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+
+            <!-- IOD -->
+            <section class="panel live-panel" id="iod-panel">
+              <div class="panel-head">
+                <span class="dot"></span>IOD · ORBIT FROM THREE POSITIONS
+                <span class="net-pill" id="iod-net-pill">NET 0</span>
+              </div>
+              <div class="panel-body">
+                <div class="subhead">GIBBS RECOVERY · RECOVERED VS TRUE ORBIT</div>
+                <div class="lab-field">
+                  <label for="iod-sat">SATELLITE</label>
+                  <select id="iod-sat" class="lab-select"></select>
+                </div>
+                <div class="ctl">
+                  <span class="ctl-label">SIGHTING SPACING <b id="iod-step-val">10 min</b></span>
+                  <input type="range" class="slider" id="iod-step" min="2" max="30" step="1" value="10" aria-label="Sighting spacing, minutes" />
+                  <span class="ctl-hint">three positions sampled this far apart</span>
+                </div>
+                <button id="iod-btn" class="btn">RECOVER ORBIT</button>
+                <div class="lab-out" id="iod-out"><div class="muted">pick a satellite and recover its orbit</div></div>
+              </div>
+              <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           3 · LANGUAGE INTERFACES — the headline differentiator
+           ===================================================================== -->
+      <section class="section band" id="interfaces">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="kicker">LANGUAGE INTERFACES</span>
+            <h2>One engine, every language.</h2>
+            <p class="dek">
+              The same reference-validated core, reachable as idiomatic code in each ecosystem.
+              No reimplementations, no drift between bindings. On the BEAM in particular, where
+              no serious GNSS library has existed, sidereon brings the full engine to Elixir.
+            </p>
+          </div>
+
+          <div class="if-controls">
+            <div class="lang-switch lang-switch-lg" id="if-lang-tabs" role="tablist" aria-label="Language"></div>
+            <div class="cap-switch" id="if-cap-tabs" role="tablist" aria-label="Capability"></div>
+          </div>
+
+          <div class="code-card panel">
+            <div class="panel-head code-head">
+              <span class="dot"></span>
+              <span id="if-filename">main.rs</span>
+              <span class="code-cap" id="if-cap-blurb"></span>
+              <a class="code-registry" id="if-registry" href="#" target="_blank" rel="noopener"></a>
+              <button class="code-copy" id="if-copy" type="button" title="Copy code">Copy</button>
+            </div>
+            <pre class="code-block"><code id="if-code"></code></pre>
+            <div class="panel-foot code-foot">
+              <span class="install-from">INSTALL</span>
+              <code id="if-install">cargo add sidereon</code>
+            </div>
+            <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+          </div>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           4 · CAPABILITIES — the engine's breadth
+           ===================================================================== -->
+      <section class="section open" id="capabilities">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="kicker">CAPABILITIES</span>
+            <h2>A full GNSS and astrodynamics stack.</h2>
+            <p class="dek">
+              From a raw element set to a precise position, sidereon covers the working surface of
+              modern satellite navigation and orbital mechanics in one consistent engine.
+            </p>
+          </div>
+          <div class="cap-grid" id="cap-grid"></div>
+        </div>
+      </section>
+
+      <!-- =====================================================================
+           5 · VALIDATION
+           ===================================================================== -->
+      <section class="section band" id="validation">
+        <div class="wrap">
+          <div class="section-head">
+            <span class="kicker">VALIDATION</span>
+            <h2>Checked against Vallado, Skyfield, IGS, and IERS.</h2>
+            <p class="dek">
+              Every subsystem is verified against the reference implementation for its domain,
+              and where that reference is open, sidereon ships the parity trace.
+            </p>
+          </div>
+          <div class="valid-grid" id="valid-grid"></div>
+        </div>
+      </section>
+
+
+      <!-- =====================================================================
+           6 · FOOTER
+           ===================================================================== -->
+      <footer class="footer" id="footer">
+        <div class="wrap footer-wrap">
+          <div class="foot-cta">
+            <h2>Use it from your stack.</h2>
+            <div class="hero-cta-row">
+              <a class="btn btn-primary" href="https://github.com/neilberkman/sidereon" target="_blank" rel="noopener">View on GitHub</a>
+            </div>
+            <div class="install-row" id="foot-install"></div>
+            <p class="license">MIT licensed · github.com/neilberkman/sidereon</p>
+          </div>
+          <div class="foot-credits">
+            <h3>Data &amp; references</h3>
+            <ul>
+              <li>Element sets · CelesTrak</li>
+              <li>Precise orbits · IGS / CODE</li>
+              <li>IONEX global TEC · AIUB / CODE</li>
+              <li>Earth orientation · IERS</li>
+              <li>Coastlines · Natural Earth</li>
+              <li>SGP4 reference vectors · Vallado / CelesTrak</li>
+            </ul>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <!-- Fullscreen panel overlay -->
+    <div id="overlay" hidden>
+      <div class="overlay-card">
+        <div class="overlay-head">
+          <span class="dot amber"></span>
+          <span id="overlay-title">PANEL</span>
+          <button id="overlay-close" class="overlay-close" aria-label="Close">ESC ✕</button>
+        </div>
+        <div class="overlay-body" id="overlay-body"></div>
+      </div>
+    </div>
+
+    <!-- Visible globe zoom control (the wheel is reserved for page scroll). -->
+    <div class="globe-zoom" id="globe-zoom">
+      <button class="gz-btn" id="gz-in" aria-label="Zoom in" title="Zoom in">+</button>
+      <button class="gz-btn" id="gz-out" aria-label="Zoom out" title="Zoom out">&minus;</button>
+      <button class="gz-btn" id="gz-reset" aria-label="Reset view" title="Reset view">&#8634;</button>
+    </div>
+
+    <div class="err-toast" id="err-toast" hidden></div>
+    <div id="crosshair" aria-hidden="true"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
