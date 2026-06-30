@@ -311,10 +311,23 @@ async function animateConstellation(now: Date, force = false): Promise<void> {
 function startLoop() {
   let raf = 0;
   let globeOnscreen = true;
+  // Throttle the whole frame (globe repaint + per-frame scroll framing reads) on
+  // touch devices. iOS runs the rAF callback at 60 (and ProMotion at up to 120)
+  // Hz; the WebGL globe does not need that, and pinning it lower frees the main
+  // thread during scroll (less "tug") and the GPU during steady auto-rotate. The
+  // 250ms property cadence below is unaffected (40fps >> 4Hz). Desktop is uncapped.
+  const coarsePointer = window.matchMedia ? window.matchMedia("(pointer: coarse)").matches : false;
+  const minFrameMs = coarsePointer ? 1000 / 40 : 0;
+  let lastFrame = 0;
   const loop = () => {
     raf = 0;
     if (document.hidden || !globeOnscreen) return;
     const t = performance.now();
+    if (minFrameMs && t - lastFrame < minFrameMs) {
+      raf = requestAnimationFrame(loop);
+      return;
+    }
+    lastFrame = t;
     const glLost = globe.isContextLost();
     if (!glLost) {
       if (globeFramingDirty) {
@@ -1564,6 +1577,16 @@ function renderTecOverlay() {
 // the section's centerpiece, so it gets a stronger fill than the hero stage.
 const HERO_FILL = 1.0;
 const LIVE_FILL = 1.32;
+// The docked globe's rendered diameter is LINEAR in the stage rect's height and
+// the fill factor (globeRadiusForRect). On the stacked mobile layout the live
+// stage frame is far shorter than a desktop column, so the desktop LIVE_FILL
+// docked a tiny, unusable disc. Boost the fill on narrow/stacked viewports so the
+// docked globe lands at a usable size (~ frame height x 0.52) without needing an
+// oversized box. Desktop keeps LIVE_FILL exactly.
+const LIVE_FILL_MOBILE = 1.85;
+function liveFill(): number {
+  return window.innerWidth <= 900 ? LIVE_FILL_MOBILE : LIVE_FILL;
+}
 
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
@@ -1640,7 +1663,7 @@ function positionLiveReadout(globeCenterY: number, frameRect: DOMRect): void {
   liveReadoutEl = cachedEl(".live-stage .stage-readout", liveReadoutEl);
   const readout = liveReadoutEl;
   if (!readout || !globe) return;
-  const radiusPx = globe.globeRadiusForRect(frameRect, LIVE_FILL);
+  const radiusPx = globe.globeRadiusForRect(frameRect, liveFill());
   const rh = readout.offsetHeight || 88;
   let top = globeCenterY - frameRect.top + radiusPx + 14;
   top = Math.min(top, frameRect.height - rh - 12);
@@ -1671,7 +1694,7 @@ function applyGlobeFraming() {
       if (lp > 0.01) {
         const e = lp * lp * (3 - 2 * lp);
         const centered = new DOMRect(0, 0, window.innerWidth, window.innerHeight);
-        applyGlobeFrame(lerpRect(centered, r, e), lerp(1, LIVE_FILL, e));
+        applyGlobeFrame(lerpRect(centered, r, e), lerp(1, liveFill(), e));
         // stacked layout: globe docks centered in the frame, so its center is the frame center
         positionLiveReadout(r.top + r.height / 2, r);
         return;

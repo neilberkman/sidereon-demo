@@ -2028,8 +2028,29 @@ body.globe-focus .overlay-card {
   }
   .live-stage-frame {
     /* fill the stage via flex:1; keep a tall floor so a short viewport still
-       docks a large globe rather than collapsing to the old 300px. */
-    min-height: 440px;
+       docks a large globe rather than collapsing to the old 300px. Paired with
+       the stacked-layout LIVE_FILL_MOBILE boost (main.ts), this floors the docked
+       globe at a usable diameter. */
+    min-height: 480px;
+  }
+  /* The code-example header bar (filename + capability sentence + registry link +
+     Copy) is a single flex row on desktop. On a narrow column the capability
+     sentence was crushed into a sliver of a flex cell and wrapped into a tall
+     stack that overflowed the bar. Let the bar wrap and give the sentence its own
+     full-width line below the filename row so it flows naturally. */
+  .code-head {
+    flex-wrap: wrap;
+    align-items: baseline;
+  }
+  .code-head .code-cap {
+    order: 1;
+    flex-basis: 100%;
+    margin: 2px 0 0;
+  }
+  /* Defensive: any panel header bar (label + status pill + control) may carry a
+     long label on a narrow phone; let it wrap instead of overflowing its row. */
+  .panel-head {
+    flex-wrap: wrap;
   }
   .sky-feature {
     max-width: 520px;
@@ -2257,5 +2278,21 @@ body.globe-focus .overlay-card {
   .labs-grid {
     grid-template-columns: 1fr;
     max-width: 520px;
+  }
+}
+
+/* Touch devices. The globe canvas claims one-finger drags (touch-action: none)
+   so it can be orbited freely. That works only if the canvas receives touches
+   over its docked stage and nowhere else. On desktop the hero routes its whole
+   content through to the full-bleed canvas (drag the headline to orbit), but on
+   a phone the hero globe is a non-interactive backdrop (the live section is the
+   interactive dock), so that routing just traps page scroll: a drag over the
+   hero copy rotates the backdrop instead of scrolling. Keep the hero content
+   clickable and scrollable here; body.globe-live still routes only the live
+   stage box to the globe, so rotation in the live demo is unaffected. */
+@media (pointer: coarse) {
+  body.globe-hero main,
+  body.globe-hero .hero-copy {
+    pointer-events: auto;
   }
 }

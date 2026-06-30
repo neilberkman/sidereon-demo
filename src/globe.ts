@@ -50,7 +50,12 @@ function renderProfile(): RenderProfile {
       antialias: false,
       coarsePointer,
       powerPreference: "low-power",
-      pixelRatioMax: 1.5,
+      // Cap the device pixel ratio hard on touch devices: iOS/Android panels are
+      // commonly DPR 3, and a continuously-repainting WebGL globe at 3x is the
+      // main cause of the "tuggy" feel. 1.25 still reads crisp on a high-DPR panel
+      // while cutting fragment work to ~1/6 of native. Non-coarse compact/low-mem
+      // tiers (e.g. a small laptop window) keep 1.5.
+      pixelRatioMax: coarsePointer ? 1.25 : 1.5,
       earthSegments: [72, 48],
       atmosphereSegments: [48, 32],
       starCount: 900,
@@ -167,15 +172,19 @@ export class Globe {
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 0.18;
     // Touch handling. The canvas is a full-bleed fixed scene behind a scrolling
-    // page, so on a coarse pointer claiming every touch (touch-action: none, the
-    // OrbitControls default) trapped vertical page scroll the instant a finger
-    // landed on the globe — the page could not be scrolled on iOS. Use `pan-y`
-    // so the browser keeps vertical-dominant gestures for native page scroll
-    // (and momentum) while horizontal-dominant drags still reach OrbitControls
-    // and rotate the globe in azimuth. Desktop (fine pointer) keeps native
-    // scroll over the fixed canvas with `auto`; mouse drag-to-rotate is
-    // unaffected since it uses pointer events, not touch gestures.
-    this.renderer.domElement.style.touchAction = this.profile.coarsePointer ? "pan-y" : "auto";
+    // page. The earlier `pan-y` compromise (reserve vertical gestures for native
+    // page scroll, give horizontal-dominant drags to OrbitControls) made the
+    // globe nearly un-rotatable on iOS: a one-finger drag is the rotate gesture,
+    // but every vertical component was stolen by the page scroller, so elevation
+    // could not be dragged at all and azimuth drags fought the scroller. Claim
+    // the gesture with `touch-action: none` so a one-finger drag rotates freely
+    // on touch. The page stays scrollable because pointer-events route only the
+    // live globe STAGE box through to this canvas (CSS, gated on pointer:coarse);
+    // every other surface keeps its own touch-action and scrolls the page, so a
+    // scroll simply starts outside the docked globe. Desktop (fine pointer) keeps
+    // native scroll over the fixed canvas with `auto`; mouse drag-to-rotate uses
+    // pointer events and is unaffected either way.
+    this.renderer.domElement.style.touchAction = this.profile.coarsePointer ? "none" : "auto";
     // WebKit-specific scroll "tug": OrbitControls registers a NON-PASSIVE `wheel`
     // listener (`{ passive: false }`) on the canvas for zoom. WebKit decides the
     // scroll path purely on the PRESENCE of a non-passive wheel listener on the
