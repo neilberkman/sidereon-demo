@@ -141,6 +141,8 @@ function showError(context: string, err: unknown): void {
 
 // ---- boot ------------------------------------------------------------------
 async function boot() {
+  // Single-sourced from the actual installed @neilberkman/sidereon version.
+  $("ver-badge").textContent = `v${__SIDEREON_VERSION__}`;
   const log = $("boot-log");
   const line = (html: string) => {
     log.innerHTML += html + "\n";

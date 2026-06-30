@@ -1,7 +1,7 @@
 {
   "name": "sidereon-demo",
   "private": true,
-  "version": "0.8.0",
+  "version": "0.9.1",
   "type": "module",
   "scripts": {
     "fetch-data": "node scripts/fetch-data.mjs",
@@ -14,11 +14,12 @@
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/ibm-plex-sans-condensed": "^5.2.8",
-    "@neilberkman/sidereon": "0.9.0",
+    "@neilberkman/sidereon": "0.9.1",
     "comlink": "^4.4.2",
     "three": "^0.169.0"
   },
   "devDependencies": {
+    "@types/node": "^26.0.1",
     "@types/three": "^0.169.0",
     "playwright": "^1.61.1",
     "typescript": "^5.6.0",
