@@ -37,7 +37,7 @@
 * {
   box-sizing: border-box;
 }
-/* NB: no global `scroll-behavior: smooth` — on Chrome it also animates
+/* NB: no global `scroll-behavior: smooth`, on Chrome it also animates
    trackpad/wheel scrolling, which lags behind the fingers and reads as the page
    "resisting" the scroll. Smooth scroll is applied per-click on in-page anchor
    links in main.ts instead, so the trackpad stays native. */
@@ -387,7 +387,7 @@ main {
   position: relative;
   z-index: 2;
   /* Drags over the headline text fall through to the globe behind, so you can
-     orbit by grabbing anywhere on the sat cloud — only the actual controls
+     orbit by grabbing anywhere on the sat cloud, only the actual controls
      (install switcher, command, buttons/links) capture pointer input. */
   pointer-events: none;
 }
@@ -660,6 +660,17 @@ main {
    Mirrors the hero stage, flipped. The single shared globe is panned LEFT (via
    setCenterBias with a negative frac) and shows through this transparent stage,
    so clicking it drops an observer and the skyplot right beside it updates. */
+/* Tighten the live section's top matter so the observer coords + stat block land
+   above a ~820px (14-inch) fold. The generic .section uses 118px padding and a
+   48px section-head margin for breathing room; the live section is the one users
+   must read without scrolling, so it gets a compact top. Scoped to #live only,
+   not .section.open (which #capabilities also uses). */
+#live {
+  padding-top: 80px;
+}
+#live .section-head {
+  margin-bottom: 28px;
+}
 .observer-pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1358,6 +1369,11 @@ main {
 
 /* ---- featured skyplot: the coolest visual, given its own wide stage ---- */
 .sky-feature {
+  /* The skyplot's rendered size. Viewport-height-relative so the plot + observer
+     coords + stat block clear a ~820px (14-inch) fold, capped so it stays sane on
+     large displays. Deliberately NOT tied to the column WIDTH or to the height of
+     the content below it: a fixed box is what stops the shrink/expand pulse. */
+  --sky-size: clamp(220px, 34vh, 360px);
   border-color: var(--line);
   box-shadow: 0 0 0 1px rgba(53, 224, 216, 0.06), 0 18px 60px rgba(0, 0, 0, 0.45),
     inset 0 0 90px rgba(53, 224, 216, 0.05);
@@ -1388,6 +1404,11 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Reserve a constant vertical box for the plot. flex:none keeps the column's
+     flex layout from ever shrinking it when the passes/stats content below grows
+     or collapses, so the canvas size cannot change on an observer update. */
+  flex: none;
+  height: var(--sky-size);
 }
 .sky-canvas-wrap::before {
   content: "";
@@ -1397,7 +1418,13 @@ main {
   pointer-events: none;
 }
 .skyplot-lg {
-  max-width: 460px;
+  /* Pin width AND height to the fixed box (was width:100% + aspect-ratio, which
+     tracked the column width and any transient reflow/scrollbar shift). The
+     skyplot reads clientWidth to size its render, so a constant CSS width means a
+     constant render: no pulse. max-width:100% only guards absurdly narrow columns. */
+  width: var(--sky-size);
+  height: var(--sky-size);
+  max-width: 100%;
 }
 .sky-side {
   display: flex;
@@ -1417,7 +1444,7 @@ main {
      "scanning passes…" line, then refilled a beat later by the async pass scan; if
      the box collapsed in between, the observer-pair row (align-items: stretch)
      shrank, the live-stage frame the globe is reframed into every frame shrank with
-     it, and the SOLVE/CONSTELLATION grid below popped up — a full-layout
+     it, and the SOLVE/CONSTELLATION grid below popped up, a full-layout
      shrink-then-expand flash (visible on Safari, which paints the intermediate
      state Chrome coalesces away). A constant height decouples the layout from the
      transient content. */
@@ -2101,7 +2128,7 @@ body.globe-focus .overlay-card {
 }
 
 /* ===========================================================================
-   ASTRODYNAMICS LAB — coverage / conjunction / IOD panels
+   ASTRODYNAMICS LAB, coverage / conjunction / IOD panels
    =========================================================================== */
 .labs-grid {
   display: grid;
