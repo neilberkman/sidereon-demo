@@ -1265,25 +1265,44 @@ main {
   appearance: none;
   -webkit-appearance: none;
   width: 100%;
-  height: 3px;
-  background: linear-gradient(
-    to right,
-    var(--cyan-dim),
-    var(--cyan)
-  );
-  border-radius: 2px;
+  /* The input needs a finger-sized hit box, not a 3px strip. iOS Safari hit-tests
+     the range input against its own content box: when that box was 3px tall, the
+     14px thumb ballooned ~5.5px above and below it, so a finger on the visible
+     thumb landed OUTSIDE the input and no drag registered (the slider read as
+     "frozen"), and the focus ring, drawn on the 3px box, sat offset from the
+     thumb. Give the input real height and draw the thin visible track on the
+     runnable-track pseudo-element instead of the input background, so the touch
+     target matches the thumb. Desktop mouse behavior is unchanged (same thin line
+     + round thumb, just an easier grab). */
+  height: 22px;
+  background: transparent;
   outline: none;
   cursor: pointer;
+  /* Native range handles the drag itself; keep the fast tap path (no double-tap
+     zoom delay) without stealing the gesture the way touch-action:none/pan-y would. */
+  touch-action: manipulation;
+}
+.slider::-webkit-slider-runnable-track {
+  height: 3px;
+  background: linear-gradient(to right, var(--cyan-dim), var(--cyan));
+  border-radius: 2px;
 }
 .slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 14px;
   height: 14px;
+  /* Center the 14px thumb on the 3px track: (3 - 14) / 2 = -5.5px. */
+  margin-top: -5.5px;
   border-radius: 50%;
   background: var(--cyan);
   border: 2px solid var(--ink);
   box-shadow: 0 0 10px rgba(53, 224, 216, 0.6);
   cursor: pointer;
+}
+.slider::-moz-range-track {
+  height: 3px;
+  background: linear-gradient(to right, var(--cyan-dim), var(--cyan));
+  border-radius: 2px;
 }
 .slider::-moz-range-thumb {
   width: 14px;
