@@ -1876,15 +1876,12 @@ body.globe-focus .overlay-card {
 }
 
 /* Live controls relocated into a maximized panel (full parity with the inline
-   panel). The solve correction set + mask slider + run button stack; toggles
-   sit on a hairline-separated row. */
+   panel). The solve correction set + mask slider stack; toggles sit on a
+   hairline-separated row. */
 .ov-solve-controls {
   display: grid;
   gap: 12px;
   margin: 4px 0 14px;
-}
-.ov-solve-controls .btn {
-  justify-self: start;
 }
 .ov-toggle-row {
   display: flex;

@@ -614,9 +614,6 @@ function setObserver(lat: number, lon: number, recenter = false) {
 // every control change shows both the new fix and how it shifts from raw.
 function runSolve() {
   if (!sppData) return;
-  const btn = $("solve-btn") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "CONVERGING…";
   requestAnimationFrame(() => {
     try {
       const baseline = solveSpp(sppData!, { ionosphere: false, troposphere: false }, 0);
@@ -639,9 +636,6 @@ function runSolve() {
     } catch (e) {
       showError("SPP solve failed", e);
       $("solve-headline").innerHTML = '<span class="err">solve failed: see console</span>';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "RUN SOLVE AGAIN";
     }
   });
 }
@@ -963,9 +957,6 @@ let coverageBusy = false;
 async function runCoverage(): Promise<void> {
   if (coverageBusy) return;
   coverageBusy = true;
-  const btn = $("coverage-btn") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "COMPUTING…";
   $("coverage-stats").textContent = "rasterizing global look angles…";
   try {
     const mask = Number(($("coverage-mask") as HTMLInputElement).value) || 0;
@@ -983,8 +974,6 @@ async function runCoverage(): Promise<void> {
     showError("coverage compute failed", e);
     $("coverage-stats").textContent = "coverage compute failed";
   } finally {
-    btn.disabled = false;
-    btn.textContent = "COMPUTE COVERAGE";
     coverageBusy = false;
   }
 }
@@ -1032,9 +1021,6 @@ async function runConjunction(): Promise<void> {
   const out = $("conj-out");
   if (!primary) return;
   conjBusy = true;
-  const btn = $("conj-btn") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "SCREENING…";
   out.classList.remove("is-hit");
   out.innerHTML = '<div class="muted">propagating the primary against the whole fleet…</div>';
   try {
@@ -1095,8 +1081,6 @@ async function runConjunction(): Promise<void> {
     showError("conjunction screen failed", e);
     out.innerHTML = '<div class="muted">conjunction screen failed: see console</div>';
   } finally {
-    btn.disabled = false;
-    btn.textContent = "SCREEN CONSTELLATION";
     conjBusy = false;
   }
 }
@@ -1125,9 +1109,6 @@ function runIod(): void {
   const s = sats[idx];
   const out = $("iod-out");
   if (!s) return;
-  const btn = $("iod-btn") as HTMLButtonElement;
-  btn.disabled = true;
-  btn.textContent = "RECOVERING…";
   requestAnimationFrame(() => {
     try {
       const step = Number(($("iod-step") as HTMLInputElement).value) || 10;
@@ -1147,9 +1128,6 @@ function runIod(): void {
     } catch (e) {
       showError("orbit recovery failed", e);
       out.innerHTML = '<div class="muted">orbit recovery failed: see console</div>';
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "RECOVER ORBIT";
     }
   });
 }
@@ -1364,11 +1342,11 @@ function closeOverlay() {
 
 // Shell builder, run once when the solve panel is maximized: lay out a controls
 // slot + a results slot, then MOVE the live, already-wired solve controls
-// (correction set, elevation mask, run button) into the overlay so the expanded
-// view can reconfigure and re-run the real WASM fix exactly like the inline
-// panel. The detailed tables refresh separately via refreshSolveOverlay so a
-// re-solve never rebuilds (and so never interrupts a mask-slider drag) the
-// relocated controls.
+// (correction set, elevation mask) into the overlay so the expanded view can
+// reconfigure and re-run the real WASM fix exactly like the inline panel. Each
+// control change re-solves on its own; the detailed tables refresh separately
+// via refreshSolveOverlay so a re-solve never rebuilds (and so never interrupts
+// a mask-slider drag) the relocated controls.
 function renderSolveOverlay() {
   const body = $("overlay-body");
   body.innerHTML = `
@@ -1377,7 +1355,6 @@ function renderSolveOverlay() {
     <div id="ov-solve-results"></div>`;
   const slot = $("ov-solve-controls");
   relocate(document.querySelector<HTMLElement>("#solve-panel .solve-controls"), slot);
-  relocate(document.getElementById("solve-btn"), slot);
   refreshSolveOverlay();
 }
 
@@ -1857,7 +1834,7 @@ function setupObservers() {
 // handlers in wire(). Set up at the end of boot() so `sats` + the worker engine
 // are ready and the observer's initial callback can prefill an already-in-view
 // panel. The panels' own busy guards (coverageBusy/conjBusy) stop a prefill and
-// a button click from double-firing.
+// a control-change recompute from double-firing.
 function setupLabPrefill(): void {
   const panels: [string, () => void][] = [
     ["coverage-panel", () => void runCoverage()],
@@ -1884,8 +1861,6 @@ function setupLabPrefill(): void {
 
 // ---- wiring ----------------------------------------------------------------
 function wire() {
-  $("solve-btn").addEventListener("click", runSolve);
-
   // CORRECTION segmented control: pick the atmosphere model set, then re-solve.
   document.querySelectorAll<HTMLButtonElement>("#solve-corr .seg-btn").forEach((b) => {
     b.addEventListener("click", () => {
@@ -1962,9 +1937,9 @@ function wire() {
 
   // Coverage heat map. Dragging the elevation-mask slider recomputes live, but
   // debounced (~250 ms) so a drag updates once it settles, not on every pixel;
-  // the status line shows "computing…" during the wait. The button triggers the
-  // same runCoverage (its busy guard stops overlap with a prefill/drag).
-  $("coverage-btn").addEventListener("click", () => void runCoverage());
+  // the status line shows "computing…" during the wait. The panel also prefills
+  // on scroll-into-view (setupLabPrefill); its busy guard stops a prefill and a
+  // drag from double-firing.
   const covMask = $("coverage-mask") as HTMLInputElement;
   const covMaskVal = $("coverage-mask-val");
   const covRecompute = debounce(() => void runCoverage(), 250);
@@ -1976,8 +1951,8 @@ function wire() {
 
   // Conjunction screen. The primary + window selects are change controls, so a
   // short debounce (~150 ms) is enough; each change reruns the same batched
-  // screen and shows a "computing…" line meanwhile.
-  $("conj-btn").addEventListener("click", () => void runConjunction());
+  // screen and shows a "computing…" line meanwhile. The panel prefills on
+  // scroll-into-view (setupLabPrefill).
   const conjRecompute = debounce(() => void runConjunction(), 150);
   const conjChanged = () => {
     const out = $("conj-out");
@@ -1989,8 +1964,8 @@ function wire() {
   $("conj-window").addEventListener("change", conjChanged);
 
   // Initial orbit determination. The satellite select reruns on change; the
-  // sighting-spacing slider recomputes debounced (~250 ms) as it drags.
-  $("iod-btn").addEventListener("click", runIod);
+  // sighting-spacing slider recomputes debounced (~250 ms) as it drags. The
+  // panel prefills on scroll-into-view (setupLabPrefill).
   const iodStep = $("iod-step") as HTMLInputElement;
   const iodStepVal = $("iod-step-val");
   const iodRecompute = debounce(() => runIod(), 250);

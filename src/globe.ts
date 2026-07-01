@@ -40,6 +40,18 @@ interface RenderProfile {
   tecSegments: [number, number];
 }
 
+// True only for desktop Safari (WebKit), which every Chromium/Gecko UA excludes.
+// Safari's WebGL is markedly slower than Chrome's/Firefox's at the same fill
+// count, so a retina Mac painting the auto-rotating globe at DPR 2 is where the
+// "tuggy" feel comes from on a fine-pointer machine that the coarse-pointer cap
+// never touches. iPadOS Safari (which reports as desktop) also matches and
+// benefits. Chrome/Firefox contain "Chrome"/"CriOS"/"FxiOS" etc. and fall
+// through, so their retina sharpness (DPR 2) is preserved.
+function isDesktopSafari(): boolean {
+  const ua = navigator.userAgent;
+  return /Safari/.test(ua) && !/(Chrome|Chromium|CriOS|FxiOS|Edg|OPR|Android)/.test(ua);
+}
+
 function renderProfile(): RenderProfile {
   const coarsePointer = window.matchMedia ? window.matchMedia("(pointer: coarse)").matches : false;
   const lowMemory = ((navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 8) <= 4;
@@ -69,7 +81,10 @@ function renderProfile(): RenderProfile {
     antialias: true,
     coarsePointer,
     powerPreference: "high-performance",
-    pixelRatioMax: 2,
+    // Desktop retina caps at DPR 2 on Chrome/Firefox (full sharpness). Safari
+    // caps at 1.5: its slower WebGL makes a full-DPR-2 auto-rotating globe drag,
+    // and 1.5 cuts fragment work to ~9/16 of native while still reading crisp.
+    pixelRatioMax: isDesktopSafari() ? 1.5 : 2,
     earthSegments: [96, 64],
     atmosphereSegments: [64, 48],
     starCount: 1800,
