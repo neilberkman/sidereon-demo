@@ -247,6 +247,10 @@ async function boot() {
   // the split reads correctly before the user touches anything.
   setHeroGlobe(true);
 
+  // Lab panels can prefill now that the constellation + engine are ready; the
+  // observers stay lazy, firing only when each panel scrolls into view.
+  setupLabPrefill();
+
   await sleep(380);
   $("boot").classList.add("done");
 }
@@ -940,6 +944,18 @@ function buildLabControls(): void {
   const iod = document.getElementById("iod-sat") as HTMLSelectElement | null;
   if (a) a.innerHTML = satOptions(0);
   if (iod) iod.innerHTML = satOptions(0);
+}
+
+// Trailing-edge debounce: coalesces a burst of calls (slider drags, rapid
+// select changes) into a single invocation after `ms` of quiet. Shared by every
+// Lab panel's live-update wiring so dragging a control recomputes smoothly
+// instead of on every pixel.
+function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): (...args: A) => void {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  return (...args: A) => {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
 }
 
 // ---- coverage heat map -----------------------------------------------------
@@ -1832,6 +1848,40 @@ function setupObservers() {
   );
 }
 
+// Pre-fill each Astrodynamics Lab panel the FIRST time it scrolls into view, so
+// the user meets a real computed result (populated coverage grid, a conjunction
+// hit, a recovered orbit) instead of an idle/empty panel. Lazy by design: one
+// IntersectionObserver per panel means nothing computes on page load, matching
+// the existing scroll-gated perf posture. Each observer disconnects after the
+// first prefill (once-guard); later input changes recompute via the debounced
+// handlers in wire(). Set up at the end of boot() so `sats` + the worker engine
+// are ready and the observer's initial callback can prefill an already-in-view
+// panel. The panels' own busy guards (coverageBusy/conjBusy) stop a prefill and
+// a button click from double-firing.
+function setupLabPrefill(): void {
+  const panels: [string, () => void][] = [
+    ["coverage-panel", () => void runCoverage()],
+    ["conj-panel", () => void runConjunction()],
+    ["iod-panel", () => runIod()],
+  ];
+  for (const [id, run] of panels) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const io = new IntersectionObserver(
+      (entries, obs) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          obs.disconnect(); // prefill once per panel
+          run();
+          break;
+        }
+      },
+      { threshold: 0.2, rootMargin: "120px 0px" },
+    );
+    io.observe(el);
+  }
+}
+
 // ---- wiring ----------------------------------------------------------------
 function wire() {
   $("solve-btn").addEventListener("click", runSolve);
@@ -1910,24 +1960,45 @@ function wire() {
   const termToggle = document.getElementById("term-toggle") as HTMLInputElement | null;
   termToggle?.addEventListener("change", (e) => toggleTerminator((e.target as HTMLInputElement).checked));
 
-  // Coverage heat map.
+  // Coverage heat map. Dragging the elevation-mask slider recomputes live, but
+  // debounced (~250 ms) so a drag updates once it settles, not on every pixel;
+  // the status line shows "computing…" during the wait. The button triggers the
+  // same runCoverage (its busy guard stops overlap with a prefill/drag).
   $("coverage-btn").addEventListener("click", () => void runCoverage());
   const covMask = $("coverage-mask") as HTMLInputElement;
   const covMaskVal = $("coverage-mask-val");
+  const covRecompute = debounce(() => void runCoverage(), 250);
   covMask.addEventListener("input", () => {
     covMaskVal.textContent = `${covMask.value}°`;
+    $("coverage-stats").textContent = "computing…";
+    covRecompute();
   });
 
-  // Conjunction screen.
+  // Conjunction screen. The primary + window selects are change controls, so a
+  // short debounce (~150 ms) is enough; each change reruns the same batched
+  // screen and shows a "computing…" line meanwhile.
   $("conj-btn").addEventListener("click", () => void runConjunction());
+  const conjRecompute = debounce(() => void runConjunction(), 150);
+  const conjChanged = () => {
+    const out = $("conj-out");
+    out.classList.remove("is-hit");
+    out.innerHTML = '<div class="muted">computing…</div>';
+    conjRecompute();
+  };
+  $("conj-a").addEventListener("change", conjChanged);
+  $("conj-window").addEventListener("change", conjChanged);
 
-  // Initial orbit determination.
+  // Initial orbit determination. The satellite select reruns on change; the
+  // sighting-spacing slider recomputes debounced (~250 ms) as it drags.
   $("iod-btn").addEventListener("click", runIod);
   const iodStep = $("iod-step") as HTMLInputElement;
   const iodStepVal = $("iod-step-val");
+  const iodRecompute = debounce(() => runIod(), 250);
   iodStep.addEventListener("input", () => {
     iodStepVal.textContent = `${iodStep.value} min`;
+    iodRecompute();
   });
+  $("iod-sat").addEventListener("change", () => runIod());
 
   buildHeroSwitcher();
   buildInterfaces();
