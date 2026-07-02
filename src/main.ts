@@ -75,13 +75,52 @@ window.fetch = ((...args: Parameters<typeof fetch>) => {
 }) as typeof fetch;
 const netCallsSinceLoad = () => netTotal - netBaseline;
 
-// The SGP4 burst that fires on every observer click runs in a Web Worker so it
-// never blocks paint. Vite bundles the worker (and its own copy of the wasm
-// engine) from this URL form. The worker is wrapped with Comlink so the heavy
-// ops read as plain awaited calls (`await observeApi.observe(...)`), each
-// returning transferable plain arrays — no wasm objects cross the thread.
-const observeWorker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
-const observeApi = Comlink.wrap<ObserveWorkerApi>(observeWorker);
+// The SGP4 burst that fires on every observer click runs in Web Workers so it
+// never blocks paint. The click worker owns observer solves, the scene worker owns
+// animation/live/lab work, and pass scans get a separate disposable worker so
+// "scanning passes..." can never sit in front of a new observer update.
+function createObserveWorker() {
+  const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
+  return { worker, api: Comlink.wrap<ObserveWorkerApi>(worker) };
+}
+const sceneWorker = createObserveWorker();
+const observeApi = sceneWorker.api;
+let clickWorker = createObserveWorker();
+let clickWorkerReady: Promise<number> | null = null;
+let passWorker = createObserveWorker();
+let passWorkerReady: Promise<number> | null = null;
+
+function ensureClickWorkerReady(): Promise<number> {
+  if (!clickWorkerReady) {
+    clickWorkerReady = clickWorker.api.init(tleSources).catch((e) => {
+      clickWorkerReady = null;
+      throw e;
+    });
+  }
+  return clickWorkerReady;
+}
+
+function resetClickWorker(): void {
+  clickWorker.worker.terminate();
+  clickWorker = createObserveWorker();
+  clickWorkerReady = null;
+}
+
+function ensurePassWorkerReady(): Promise<number> {
+  if (!passWorkerReady) {
+    passWorkerReady = passWorker.api.init(tleSources).catch((e) => {
+      passWorkerReady = null;
+      throw e;
+    });
+  }
+  return passWorkerReady;
+}
+
+function resetPassWorker(): void {
+  passWorker.worker.terminate();
+  passWorker = createObserveWorker();
+  passWorkerReady = null;
+}
 
 let sats: Sat[] = [];
 const tleSources: TleSource[] = [];
@@ -183,10 +222,14 @@ async function boot() {
     await sleep(55);
   }
   line(`  total tracked · <span class="ok">${sats.length}</span> objects`);
-  // Hand the same raw element-set text to the worker so it parses its own Sat
-  // array (wasm Tle handles can't be shared) and warms its wasm engine. Done once.
-  const workerSats = await observeApi.init(tleSources);
-  line(`  worker engine online · <span class="em">${workerSats}</span> satellites off-thread`);
+  // Hand the same raw element-set text to the workers so each parses its own Sat
+  // array (wasm Tle handles can't be shared) and warms its wasm engine. The scene
+  // worker is awaited for boot; click/pass workers warm in parallel.
+  const sceneReady = observeApi.init(tleSources);
+  void ensureClickWorkerReady().catch((e) => console.warn("[sidereon] click worker warmup failed", e));
+  void ensurePassWorkerReady().catch((e) => console.warn("[sidereon] pass worker warmup failed", e));
+  const workerSats = await sceneReady;
+  line(`  scene worker online · <span class="em">${workerSats}</span> satellites off-thread`);
   await sleep(70);
 
   line('<span class="ok">›</span> propagating constellation @ current UTC');
@@ -557,6 +600,29 @@ function geocode(lat: number, lon: number): string {
 // Dedup token: only the newest observer click's worker result is applied, so a
 // rapid series of clicks never paints a stale (superseded) burst.
 let observeSeq = 0;
+let passSeq = 0;
+let passBusy = false;
+
+async function scanPassesForObserver(seq: number, lat: number, lon: number, micros: bigint, perfKey: string): Promise<void> {
+  const thisPassSeq = ++passSeq;
+  if (passBusy) resetPassWorker();
+  passBusy = true;
+  const api = passWorker.api;
+  try {
+    await ensurePassWorkerReady();
+    const passes = await api.passes(lat, lon, micros);
+    if (thisPassSeq !== passSeq || seq !== observeSeq) return;
+    if (!observer || observer.lat !== lat || observer.lon !== lon) return;
+    applyPasses(passes);
+    performance.mark(`${perfKey}:passes`);
+    performance.measure("sidereon:observer:passes", `${perfKey}:start`, `${perfKey}:passes`);
+  } catch (e) {
+    if (thisPassSeq !== passSeq || seq !== observeSeq) return;
+    showError("pass scan failed", e);
+  } finally {
+    if (thisPassSeq === passSeq) passBusy = false;
+  }
+}
 
 function setObserver(lat: number, lon: number, recenter = false) {
   observer = { lat, lon };
@@ -592,10 +658,12 @@ function setObserver(lat: number, lon: number, recenter = false) {
   const seq = ++observeSeq;
   const perfKey = `sidereon:observer:${seq}`;
   performance.mark(`${perfKey}:start`);
+  if (observerBurstBusy) resetClickWorker();
   observerBurstBusy = true;
   const micros = nowMicros(new Date());
-  observeApi
-    .observe(lat, lon, micros)
+  const api = clickWorker.api;
+  ensureClickWorkerReady()
+    .then(() => api.observe(lat, lon, micros))
     .then((data) => {
       if (seq !== observeSeq) return; // a newer click superseded this one
       if (!observer || observer.lat !== lat || observer.lon !== lon) return;
@@ -605,24 +673,14 @@ function setObserver(lat: number, lon: number, recenter = false) {
       globe.setObserverPending(false); // fast result in — stop the pulse
     })
     .catch((e) => {
+      if (seq !== observeSeq) return;
       globe.setObserverPending(false);
       showError("observer update failed", e);
-    });
-  // The slow 6 h pass scan trails as its own worker call so it never delays the
-  // fast results above; it fills the passes panel a beat later.
-  observeApi
-    .passes(lat, lon, micros)
-    .then((passes) => {
-      if (seq !== observeSeq) return;
-      if (!observer || observer.lat !== lat || observer.lon !== lon) return;
-      applyPasses(passes);
-      performance.mark(`${perfKey}:passes`);
-      performance.measure("sidereon:observer:passes", `${perfKey}:start`, `${perfKey}:passes`);
     })
-    .catch((e) => showError("pass scan failed", e))
     .finally(() => {
       if (seq === observeSeq) observerBurstBusy = false;
     });
+  void scanPassesForObserver(seq, lat, lon, micros, perfKey);
 }
 
 // ---- SPP solve -------------------------------------------------------------
