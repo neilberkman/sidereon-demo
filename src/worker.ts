@@ -9,16 +9,17 @@
 // parses its own satellites and builds its own Constellation. Every result posted
 // back is plain data (numbers + typed arrays), never a wasm object.
 //
-// The worker holds exactly one engine object, a `Constellation`, built once from
-// the parsed TLEs. Every per-epoch operation (the animation, comet trails, ground
-// tracks, sky arcs, visibility, passes) is a single batched call on it rather than
-// a per-satellite loop across the wasm boundary. Plain index-aligned `meta`
-// carries the demo's prn/constellation labels alongside the fleet.
+// The worker holds a long-lived all-catalog `Constellation` for all-catalog jobs.
+// Observer-only work builds short-lived visible-subset constellations, so the demo
+// still dogfoods the engine's batched APIs without propagating satellites the UI
+// will immediately discard. Plain index-aligned `meta` carries the demo's
+// prn/constellation labels alongside the fleet.
 
 import * as Comlink from "comlink";
 import {
   Constellation as Fleet,
   GroundStation,
+  Tle,
   temeToGcrs,
   gcrsToItrs,
   screenTcaCandidates,
@@ -148,10 +149,17 @@ interface SatMeta {
 }
 
 let fleet: Fleet | null = null;
+let tleLinesByIndex: [string, string][] = [];
 let meta: SatMeta[] = [];
 // Catalog number -> fleet index, so `Constellation.visible` results (keyed by the
 // satellite's own catalog number) map back to the demo's prn/constellation labels.
 let indexByCatalog = new Map<string, number>();
+let indexByPrn = new Map<string, number>();
+
+interface VisibleFleet {
+  fleet: Fleet;
+  indexes: number[];
+}
 
 function trackEpochs(centerMicros: bigint): BigInt64Array {
   const epochs: bigint[] = [];
@@ -161,20 +169,51 @@ function trackEpochs(centerMicros: bigint): BigInt64Array {
   return BigInt64Array.from(epochs);
 }
 
+function visibleIndexes(visible: VisibleSat[]): number[] {
+  const seen = new Set<number>();
+  const indexes: number[] = [];
+  for (const v of visible) {
+    const i = indexByPrn.get(v.prn);
+    if (i === undefined || seen.has(i)) continue;
+    seen.add(i);
+    indexes.push(i);
+  }
+  return indexes;
+}
+
+function buildVisibleFleet(visible: VisibleSat[]): VisibleFleet | null {
+  const indexes = visibleIndexes(visible);
+  if (indexes.length === 0 || tleLinesByIndex.length === 0) return null;
+  const handles = indexes.map((i) => {
+    const [line1, line2] = tleLinesByIndex[i];
+    return new Tle(line1, line2);
+  });
+  return { fleet: new Fleet(handles), indexes };
+}
+
 // Ground tracks for the currently-visible satellites: one batched
-// Constellation.groundTracks call gives every satellite's WGS84 subpoint track
-// (the engine's validated TEME->GCRS->ITRS->geodetic path), and each point is
-// projected to a scene-unit vector for the globe. Filtered to the visible set.
-function groundTracksFor(visible: VisibleSat[], centerMicros: bigint): ObserveTrack[] {
-  if (!fleet || meta.length === 0) return [];
-  const tracks = fleet.groundTracks(trackEpochs(centerMicros));
-  const visiblePrns = new Set(visible.map((v) => v.prn));
+// Constellation.groundTracks call over a visible-subset fleet. This keeps the
+// demonstrated library path batched while avoiding all-catalog work for a
+// visible-only overlay.
+function groundTracksFor(visibleFleet: VisibleFleet | null, centerMicros: bigint): ObserveTrack[] {
+  if (!visibleFleet || meta.length === 0) return [];
+  const epochs = trackEpochs(centerMicros);
+  const tracks = visibleFleet.fleet.groundTracks(epochs);
   const out: ObserveTrack[] = [];
-  for (let i = 0; i < meta.length; i++) {
-    if (!visiblePrns.has(meta[i].prn)) continue;
-    const gt = tracks[i];
-    const lat = gt.latDeg;
-    const lon = gt.lonDeg;
+  for (let localIdx = 0; localIdx < visibleFleet.indexes.length; localIdx++) {
+    const i = visibleFleet.indexes[localIdx];
+    const m = meta[i];
+    const gt = tracks[localIdx];
+    let lat: Float64Array = new Float64Array();
+    let lon: Float64Array = new Float64Array();
+    try {
+      lat = gt.latDeg;
+      lon = gt.lonDeg;
+    } catch {
+      continue;
+    } finally {
+      gt?.free?.();
+    }
     const ecef = new Float32Array(lat.length * 3).fill(NaN);
     for (let j = 0; j < lat.length; j++) {
       if (!Number.isFinite(lat[j]) || !Number.isFinite(lon[j])) continue;
@@ -183,7 +222,7 @@ function groundTracksFor(visible: VisibleSat[], centerMicros: bigint): ObserveTr
       ecef[j * 3 + 1] = u[1];
       ecef[j * 3 + 2] = u[2];
     }
-    out.push({ prn: meta[i].prn, constellation: meta[i].constellation, ecef });
+    out.push({ prn: m.prn, constellation: m.constellation, ecef });
   }
   return out;
 }
@@ -252,12 +291,16 @@ function computeVisible(lat: number, lon: number, micros: bigint): VisibleSat[] 
   }
 }
 
-// Sky-plot arcs: one batched Constellation.lookAngleArcs gives every satellite's
-// az/el arc across the +/- window; we keep the arcs whose satellite is above the
-// horizon at the centre sample (the same filter skyTracks applied). `nowIdx` is
-// the centre sample index.
-function skyArcs(lat: number, lon: number, centerMicros: bigint): { arcs: ObserveArc[]; nowIdx: number } {
-  if (!fleet || meta.length === 0) return { arcs: [], nowIdx: 0 };
+// Sky-plot arcs: one batched Constellation.lookAngleArcs over the visible-subset
+// fleet gives each currently visible satellite's az/el arc across the +/- window.
+// `nowIdx` is the centre sample index.
+function skyArcs(
+  lat: number,
+  lon: number,
+  centerMicros: bigint,
+  visibleFleet: VisibleFleet | null,
+): { arcs: ObserveArc[]; nowIdx: number } {
+  if (!visibleFleet || meta.length === 0) return { arcs: [], nowIdx: 0 };
   const epochList: bigint[] = [];
   for (let m = -SKY_BACK_MIN; m <= SKY_FWD_MIN + 1e-6; m += SKY_STEP_MIN) {
     epochList.push(centerMicros + BigInt(Math.round(m * 60 * 1e6)));
@@ -267,22 +310,28 @@ function skyArcs(lat: number, lon: number, centerMicros: bigint): { arcs: Observ
   const station = new GroundStation(lat, lon, 0);
   let arcsRaw;
   try {
-    arcsRaw = fleet.lookAngleArcs(station, epochs);
+    arcsRaw = visibleFleet.fleet.lookAngleArcs(station, epochs);
   } finally {
     station.free();
   }
   const arcs: ObserveArc[] = [];
-  for (let i = 0; i < meta.length; i++) {
-    const la = arcsRaw[i];
-    const el = Array.from(la.elevationDeg) as number[];
-    if (el.length === 0 || !(el[nowIdx] > 0)) continue; // only sats above the horizon now
-    arcs.push({
-      prn: meta[i].prn,
-      constellation: meta[i].constellation,
-      az: Array.from(la.azimuthDeg) as number[],
-      el,
-      nowIdx,
-    });
+  for (let localIdx = 0; localIdx < visibleFleet.indexes.length; localIdx++) {
+    const i = visibleFleet.indexes[localIdx];
+    const m = meta[i];
+    const la = arcsRaw[localIdx];
+    try {
+      const el = Array.from(la.elevationDeg) as number[];
+      if (el.length === 0 || !(el[nowIdx] > 0)) continue; // only sats above the horizon now
+      arcs.push({
+        prn: m.prn,
+        constellation: m.constellation,
+        az: Array.from(la.azimuthDeg) as number[],
+        el,
+        nowIdx,
+      });
+    } finally {
+      la?.free?.();
+    }
   }
   return { arcs, nowIdx };
 }
@@ -299,6 +348,8 @@ const api = {
     const parsed = sources.flatMap((src) => parseTleFile(src.text, src.constellation));
     meta = parsed.map((s) => ({ prn: s.prn, constellation: s.constellation }));
     indexByCatalog = new Map(parsed.map((s, i) => [s.tle.catalogNumber, i]));
+    indexByPrn = new Map(parsed.map((s, i) => [s.prn, i]));
+    tleLinesByIndex = parsed.map((s) => s.tle.toLines() as [string, string]);
     fleet = new Fleet(parsed.map((s) => s.tle)); // consumes the Tle handles
     return fleet.satelliteCount;
   },
@@ -434,8 +485,15 @@ const api = {
   // scan is split into passes() below so it never delays these.
   observe(lat: number, lon: number, micros: bigint): ObserveResult {
     const visible = computeVisible(lat, lon, micros);
-    const { arcs } = skyArcs(lat, lon, micros);
-    const groundTracks = groundTracksFor(visible, micros);
+    const visibleFleet = buildVisibleFleet(visible);
+    let arcs: ObserveArc[] = [];
+    let groundTracks: ObserveTrack[] = [];
+    try {
+      arcs = skyArcs(lat, lon, micros, visibleFleet).arcs;
+      groundTracks = groundTracksFor(visibleFleet, micros);
+    } finally {
+      visibleFleet?.fleet.free();
+    }
 
     return Comlink.transfer(
       { visible, arcs, groundTracks },
@@ -513,7 +571,15 @@ const api = {
   // ground tracks only when asked (the loop did this every 8th tick).
   live(lat: number, lon: number, micros: bigint, includeTracks: boolean): LiveResult {
     const visible = computeVisible(lat, lon, micros);
-    const groundTracks = includeTracks ? groundTracksFor(visible, micros) : null;
+    let groundTracks: ObserveTrack[] | null = null;
+    if (includeTracks) {
+      const visibleFleet = buildVisibleFleet(visible);
+      try {
+        groundTracks = groundTracksFor(visibleFleet, micros);
+      } finally {
+        visibleFleet?.fleet.free();
+      }
+    }
     return Comlink.transfer(
       { visible, groundTracks },
       groundTracks ? groundTracks.map((t) => t.ecef.buffer) : [],

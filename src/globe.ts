@@ -383,7 +383,7 @@ export class Globe {
   }
 
   // ---- constellation ----
-  setSats(sats: Sat[], micros: bigint): void {
+  setSats(sats: Sat[], micros: bigint, buildOrbitRings = true): void {
     this.sats = sats;
     const n = sats.length;
     this.satPos = new Float32Array(n * 3);
@@ -435,11 +435,13 @@ export class Globe {
     this.satPoints.frustumCulled = false;
     this.scene.add(this.satPoints);
 
-    // Static inertial orbit rings are built once here (boot-time, never in the
-    // loop). The animated dot positions and comet trails are computed off-thread
-    // and applied via setSatPositions / setTrailsFromBuffers, so no SGP4 runs on
-    // the main thread per tick — the caller seeds the first frame from the worker
-    // right after setSats.
+    // Static inertial orbit rings are optional at boot. The animated dot positions
+    // and comet trails are computed off-thread and applied via setSatPositions /
+    // setTrailsFromBuffers, so no SGP4 runs on the main thread per tick.
+    if (buildOrbitRings) this.buildOrbits(micros);
+  }
+
+  buildOrbitRings(micros: bigint): void {
     this.buildOrbits(micros);
   }
 

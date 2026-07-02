@@ -52,6 +52,14 @@ import {
 
 const $ = (id: string) => document.getElementById(id)!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+function onIdle(fn: () => void, timeout = 1500): void {
+  if ("requestIdleCallback" in window) {
+    (window as unknown as { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number })
+      .requestIdleCallback(fn, { timeout });
+  } else {
+    window.setTimeout(fn, Math.min(timeout, 900));
+  }
+}
 
 // ---- network-call accounting -----------------------------------------------
 // Wrap fetch so we can assert, on screen, that nothing talks to a server once
@@ -80,6 +88,7 @@ const tleSources: TleSource[] = [];
 let globe: Globe;
 let sppData: SppData | null = null;
 let tecField: TecField | null = null;
+let tecWarmup: Promise<TecField> | null = null;
 let observer: { lat: number; lon: number } | null = null;
 let visible: VisibleSat[] = [];
 let lastDual: DualSolve | null = null;
@@ -189,7 +198,7 @@ async function boot() {
   okFetch("/data/states50.json").then((r) => r.json()).then((s) => (states = s)).catch(() => {});
   const now = new Date();
   globe.setTime(now);
-  globe.setSats(sats, nowMicros(now));
+  globe.setSats(sats, nowMicros(now), false);
   // Seed the first constellation frame (dots + trails) from the worker so the
   // globe is populated before the loop starts — no SGP4 runs on the main thread.
   await animateConstellation(now, true);
@@ -221,16 +230,8 @@ async function boot() {
   line(`  ${sppData.provenance.obsCount} pseudoranges armed · ${sppData.provenance.constellations}`);
   await sleep(90);
 
-  // Preload the IONEX product NOW, before the baseline is frozen, so the later
-  // TEC toggle is a pure in-browser render with zero network calls.
-  try {
-    tecField = await loadTecField();
-    drawTecMap(tecField, $("tec-map") as HTMLCanvasElement, $("tec-scale"));
-    line(`  IONEX · global VTEC ${tecField.min.toFixed(1)}–${tecField.max.toFixed(1)} TECU · ready`);
-  } catch (e) {
-    showError("IONEX preload failed", e);
-  }
-  await sleep(70);
+  line("  IONEX · lazy on TEC toggle");
+  await sleep(35);
   line('<span class="ok">›</span> instrument ready · the engine is live in this tab');
 
   // From here on, no network traffic should occur. Snapshot the baseline so the
@@ -250,9 +251,14 @@ async function boot() {
   // Lab panels can prefill now that the constellation + engine are ready; the
   // observers stay lazy, firing only when each panel scrolls into view.
   setupLabPrefill();
+  if (new URLSearchParams(window.location.search).has("perf")) {
+    (window as unknown as { __sidereonPerf?: { setObserver: (lat: number, lon: number) => void } })
+      .__sidereonPerf = { setObserver: (lat, lon) => setObserver(lat, lon, true) };
+  }
 
   await sleep(380);
   $("boot").classList.add("done");
+  onIdle(() => globe.buildOrbitRings(nowMicros(new Date())), 1800);
 }
 
 function buildLegend() {
@@ -486,8 +492,9 @@ function applyPasses(passes: ObservePass[]) {
 // call and the globe ground tracks every 8th tick, all off-thread. An in-flight
 // guard drops overlapping ticks so a slow burst never queues up behind itself.
 let liveBusy = false;
+let observerBurstBusy = false;
 function refreshObserverLive() {
-  if (!observer || liveBusy) return;
+  if (!observer || liveBusy || observerBurstBusy) return;
   const { lat, lon } = observer;
   liveBusy = true;
   const includeTracks = liveTickCount % 8 === 0;
@@ -583,6 +590,9 @@ function setObserver(lat: number, lon: number, recenter = false) {
   // the 6 h pass scan — runs in the worker. The page stays responsive while it
   // computes; the arrays are rendered when they arrive.
   const seq = ++observeSeq;
+  const perfKey = `sidereon:observer:${seq}`;
+  performance.mark(`${perfKey}:start`);
+  observerBurstBusy = true;
   const micros = nowMicros(new Date());
   observeApi
     .observe(lat, lon, micros)
@@ -590,6 +600,8 @@ function setObserver(lat: number, lon: number, recenter = false) {
       if (seq !== observeSeq) return; // a newer click superseded this one
       if (!observer || observer.lat !== lat || observer.lon !== lon) return;
       applyObserve(data);
+      performance.mark(`${perfKey}:fast`);
+      performance.measure("sidereon:observer:fast", `${perfKey}:start`, `${perfKey}:fast`);
       globe.setObserverPending(false); // fast result in — stop the pulse
     })
     .catch((e) => {
@@ -604,8 +616,13 @@ function setObserver(lat: number, lon: number, recenter = false) {
       if (seq !== observeSeq) return;
       if (!observer || observer.lat !== lat || observer.lon !== lon) return;
       applyPasses(passes);
+      performance.mark(`${perfKey}:passes`);
+      performance.measure("sidereon:observer:passes", `${perfKey}:start`, `${perfKey}:passes`);
     })
-    .catch((e) => showError("pass scan failed", e));
+    .catch((e) => showError("pass scan failed", e))
+    .finally(() => {
+      if (seq === observeSeq) observerBurstBusy = false;
+    });
 }
 
 // ---- SPP solve -------------------------------------------------------------
@@ -809,6 +826,24 @@ function startHeroSolveLoop() {
 
 // ---- IONEX TEC -------------------------------------------------------------
 let tecSeq = 0;
+
+function warmTecField(): Promise<TecField> {
+  if (tecField) return Promise.resolve(tecField);
+  if (!tecWarmup) {
+    tecWarmup = loadTecField()
+      .then((field) => {
+        tecField = field;
+        drawTecMap(field, $("tec-map") as HTMLCanvasElement, $("tec-scale"));
+        return field;
+      })
+      .catch((e) => {
+        tecWarmup = null;
+        throw e;
+      });
+  }
+  return tecWarmup;
+}
+
 async function toggleTec(on: boolean) {
   const seq = ++tecSeq;
   try {
@@ -819,7 +854,7 @@ async function toggleTec(on: boolean) {
     }
     if (!tecField) {
       $("tec-stats").textContent = "sampling global VTEC…";
-      const field = await loadTecField();
+      const field = await warmTecField();
       if (seq !== tecSeq) return;
       tecField = field;
       drawTecMap(tecField, $("tec-map") as HTMLCanvasElement, $("tec-scale"));
