@@ -731,7 +731,9 @@ sidereon_sp3_free(sp3);`,
     id: "elixir",
     name: "Elixir",
     tag: "ex",
-    install: '{:sidereon, "~> 0.8"}',
+    // Derived from the installed engine version so the snippet can never go
+    // stale (all five interfaces release under one version number).
+    install: `{:sidereon, "~> ${__SIDEREON_VERSION__.split(".").slice(0, 2).join(".")}"}`,
     installNote: "Hex, in mix.exs",
     registry: "https://hex.pm/packages/sidereon",
     registryLabel: "hex.pm/packages/sidereon",
