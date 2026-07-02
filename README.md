@@ -15,7 +15,7 @@ serious GNSS library has existed before.
 | --- | --- | --- |
 | Rust | `cargo add sidereon` | crates.io/crates/sidereon |
 | Python | `pip install sidereon` | pypi.org/project/sidereon |
-| Elixir | `{:sidereon, "~> 0.8"}` in `mix.exs` | hex.pm/packages/sidereon |
+| Elixir | `{:sidereon, "~> 0.10"}` in `mix.exs` | hex.pm/packages/sidereon |
 | JavaScript / WASM | `npm i @neilberkman/sidereon` | npmjs.com/package/@neilberkman/sidereon |
 | C | link `libsidereon` + the cbindgen header | github.com/neilberkman/sidereon |
 
@@ -73,8 +73,7 @@ epoch in `data-manifest.json` so the constellation panel can show its age.
 
 ## Build and run
 
-Requires Node 18+ and the locally built `sidereon-wasm` package (referenced via
-`file:../sidereon-wasm/pkg` in `package.json`).
+Requires Node 18+ and the published `@neilberkman/sidereon` WASM package.
 
 ```
 npm install

@@ -11,15 +11,28 @@ import { dirname, join } from "node:path";
 const DATA = join(dirname(fileURLToPath(import.meta.url)), "..", "public", "data");
 const UA = "sidereon-demo build-time data refresh (one fetch per build)";
 
+function fetchError(error, url) {
+  const reason = error.cause?.code ? `${error.message}: ${error.cause.code}` : error.message;
+  return new Error(`${reason} (${url})`);
+}
+
 async function getText(url) {
-  const r = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
-  return r.text();
+  try {
+    const r = await fetch(url, { headers: { "User-Agent": UA } });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.text();
+  } catch (e) {
+    throw fetchError(e, url);
+  }
 }
 async function getGz(url) {
-  const r = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!r.ok) throw new Error(`${r.status} ${url}`);
-  return gunzipSync(Buffer.from(await r.arrayBuffer())).toString("utf8");
+  try {
+    const r = await fetch(url, { headers: { "User-Agent": UA } });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return gunzipSync(Buffer.from(await r.arrayBuffer())).toString("utf8");
+  } catch (e) {
+    throw fetchError(e, url);
+  }
 }
 
 const manifest = { fetchedAt: new Date().toISOString(), refreshed: [], kept: [] };
@@ -51,27 +64,30 @@ try {
   console.warn(`[fetch-data] could not parse TLE epoch (${e.message})`);
 }
 
-// --- Global IONEX (AIUB/CODE), best-effort newest-first walk --------------
-function ymd(off) {
-  const d = new Date(Date.now() + off * 86400000);
-  const y = d.getUTCFullYear();
-  const doy = Math.floor((Date.UTC(y, d.getUTCMonth(), d.getUTCDate()) - Date.UTC(y, 0, 1)) / 86400000) + 1;
-  return { y, doy: String(doy).padStart(3, "0") };
-}
+// --- Global IONEX (AIUB/CODE), newest listed CODE GIM --------------------
 let ionexOk = false;
-const cands = [];
-for (const off of [1, 0, -1, -2, -3]) { const { y, doy } = ymd(off); cands.push(["COD0OPSPRD", y, doy]); }
-for (const off of [-1, -2, -3, -4]) { const { y, doy } = ymd(off); cands.push(["COD0OPSRAP", y, doy]); }
-for (const [prod, y, doy] of cands) {
+const years = [new Date().getUTCFullYear(), new Date().getUTCFullYear() - 1];
+for (const y of years) {
+  if (ionexOk) break;
+
   try {
-    const txt = await getGz(`http://ftp.aiub.unibe.ch/CODE/${y}/${prod}_${y}${doy}0000_01D_01H_GIM.INX.gz`);
-    if (!txt.includes("LAT/LON1/LON2")) throw new Error("not an IONEX grid");
-    writeFileSync(join(DATA, "global.ionex"), txt);
-    manifest.ionex = `${prod}_${y}${doy}`;
-    manifest.refreshed.push("global.ionex");
-    ionexOk = true;
-    break;
-  } catch { /* try next candidate */ }
+    const index = await getText(`http://ftp.aiub.unibe.ch/CODE/${y}/`);
+    const names = Array.from(index.matchAll(/href="(COD0OPS[A-Z]+_\d{11}_01D_01H_GIM\.INX\.gz)"/g), (m) => m[1])
+      .sort()
+      .reverse();
+
+    for (const name of names) {
+      try {
+        const txt = await getGz(`http://ftp.aiub.unibe.ch/CODE/${y}/${name}`);
+        if (!txt.includes("LAT/LON1/LON2")) throw new Error("not an IONEX grid");
+        writeFileSync(join(DATA, "global.ionex"), txt);
+        manifest.ionex = name.replace(/\.INX\.gz$/, "");
+        manifest.refreshed.push("global.ionex");
+        ionexOk = true;
+        break;
+      } catch { /* try next listed product */ }
+    }
+  } catch { /* try previous year */ }
 }
 if (!ionexOk) { console.warn("[fetch-data] kept existing global.ionex (no live GIM reachable)"); manifest.kept.push("global.ionex"); }
 
