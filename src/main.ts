@@ -75,14 +75,15 @@ window.fetch = ((...args: Parameters<typeof fetch>) => {
 }) as typeof fetch;
 const netCallsSinceLoad = () => netTotal - netBaseline;
 
-// The SGP4 burst that fires on every observer click runs in Web Workers so it
-// never blocks paint. The click worker owns observer solves, the scene worker owns
-// animation/live/lab work, and pass scans get a separate disposable worker so
-// "scanning passes..." can never sit in front of a new observer update.
+// The SGP4 work runs in Web Workers so it never blocks paint. Animation gets a
+// dedicated worker; live observer/lab work, click bursts, and pass scans each have
+// separate queues so slow observer or lab jobs cannot sit in front of dot updates.
 function createObserveWorker() {
   const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
   return { worker, api: Comlink.wrap<ObserveWorkerApi>(worker) };
 }
+const animationWorker = createObserveWorker();
+const animationApi = animationWorker.api;
 const sceneWorker = createObserveWorker();
 const observeApi = sceneWorker.api;
 let clickWorker = createObserveWorker();
@@ -223,13 +224,16 @@ async function boot() {
   }
   line(`  total tracked · <span class="ok">${sats.length}</span> objects`);
   // Hand the same raw element-set text to the workers so each parses its own Sat
-  // array (wasm Tle handles can't be shared) and warms its wasm engine. The scene
-  // worker is awaited for boot; click/pass workers warm in parallel.
+  // array (wasm Tle handles can't be shared) and warms its wasm engine. The
+  // animation and live/lab workers are awaited for boot; click/pass workers warm
+  // in parallel.
+  const animationReady = animationApi.init(tleSources);
   const sceneReady = observeApi.init(tleSources);
   void ensureClickWorkerReady().catch((e) => console.warn("[sidereon] click worker warmup failed", e));
   void ensurePassWorkerReady().catch((e) => console.warn("[sidereon] pass worker warmup failed", e));
-  const workerSats = await sceneReady;
-  line(`  scene worker online · <span class="em">${workerSats}</span> satellites off-thread`);
+  const [animationSats, sceneSats] = await Promise.all([animationReady, sceneReady]);
+  line(`  animation worker online · <span class="em">${animationSats}</span> satellites off-thread`);
+  line(`  live worker online · <span class="em">${sceneSats}</span> satellites off-thread`);
   await sleep(70);
 
   line('<span class="ok">›</span> propagating constellation @ current UTC');
@@ -350,7 +354,7 @@ async function animateConstellation(now: Date, force = false): Promise<void> {
   animBusy = true;
   try {
     const includeTrails = force || animTrailTick % 8 === 0;
-    const data = await observeApi.animation(nowMicros(now), includeTrails);
+    const data = await animationApi.animation(nowMicros(now), includeTrails);
     globe.setSatPositions(data.satPos);
     if (data.trails) globe.setTrailsFromBuffers(data.trails);
     animTrailTick++;
@@ -1333,17 +1337,20 @@ const CAP_CARDS: [string, string][] = [
   ["SBAS", "Satellite-based augmentation corrections for ranging and integrity."],
   ["INTEGRITY", "RAIM and fault detection-and-exclusion with chi-square testing across the measurement set."],
   ["SGP4", "Two-line element propagation in the TEME frame, batched and parallelized across epochs to sweep a whole constellation fast."],
-  ["ORBITAL DECAY", "Atmospheric-drag modeling with orbital-lifetime and reentry estimation."],
+  ["ORBITAL DECAY", "Atmospheric-drag modeling with orbital-lifetime and reentry estimation, driven by space-weather indices."],
   ["IOD", "Initial orbit determination from three position or angle-only observations (Gibbs, Herrick-Gibbs, Gauss)."],
-  ["ELEMENTS", "State-vector to classical orbital-element conversion, plus reduced-orbit fitting and evaluation, with mean, eccentric, and true anomaly conversions and equinoctial elements."],
+  ["ELEMENTS", "State-vector to classical orbital-element conversion, plus reduced-orbit fitting and TLE mean-element fitting, with mean, eccentric, and true anomaly conversions and equinoctial elements."],
   ["RELATIVE MOTION", "RIC, RTN, and LVLH relative frames with Clohessy-Wiltshire rendezvous between two spacecraft."],
   ["FRAMES + TIME", "TEME, GCRS, and ITRS transforms with IAU time scales and Earth orientation; geoid undulation and orthometric heights."],
   ["TERRAIN", "DTED terrain-elevation lookup with one-call tile fetch for observer and target heights."],
   ["ATMOSPHERE", "Troposphere (Saastamoinen with Niell/VMF mapping) and ionosphere (Klobuchar, IONEX maps, and Galileo NeQuick-G) path delays."],
-  ["RINEX", "Observation, navigation, and clock files parsed across RINEX 3 and 4."],
-  ["RTCM", "Real-time RTCM 3.x correction streams: MSM observations, station coordinates, and broadcast ephemeris, decoded and re-encoded."],
+  ["RINEX", "Observation, navigation, and clock files parsed across RINEX 3 and 4, including CNAV and CNAV2 broadcast messages."],
+  ["QUALITY CONTROL", "A quality pass over observation data: per-satellite and per-signal completeness, gaps, cycle slips, multipath, and signal strength, with RINEX lint and repair, checked against teqc."],
+  ["RTCM", "Real-time RTCM 3.x correction streams: MSM observations, station coordinates, and broadcast ephemeris, decoded and re-encoded, with carrier-phase lock-time indicators mapped to RINEX loss-of-lock the way real converters should."],
+  ["NTRIP", "Streaming NTRIP caster client that feeds those RTCM corrections straight into the solve, with NMEA receiver output parsed on the way in."],
   ["SSR / HAS", "State-space orbit, clock, and code and phase bias corrections from real-time SSR and Galileo HAS streams."],
   ["SPK", "JPL/NAIF SPK (.bsp) ephemeris kernels with precise state interpolation for planets and spacecraft."],
+  ["COVARIANCE", "Six-by-six orbit covariance propagation with process noise and frame transport, feeding the collision-probability integration."],
   ["CONJUNCTION", "Close-approach screening with collision probability, plus reading and writing CCSDS messages: CDM, OMM, OEM, and OPM."],
   ["ANTEX", "Antenna phase-center offsets and variation patterns from ANTEX."],
   ["DOP", "Geometric dilution of precision from receiver-satellite line-of-sight geometry."],
@@ -1361,8 +1368,9 @@ function buildCapabilities() {
 
 const VALID_CARDS: [string, string][] = [
   ["SGP4", "Propagation matched against the Vallado and CelesTrak verification vectors."],
-  ["FRAMES & TIME", "TEME / GCRS / ITRS transforms checked against Skyfield and the IAU conventions."],
+  ["FRAMES & TIME", "TEME / GCRS / ITRS transforms checked against Skyfield and the IAU conventions, with EGM96 geoid undulations matched to PROJ."],
   ["POSITIONING", "Solved against real IGS precise products and a committed parity trace to sub-micron agreement."],
+  ["GNSS DATA QUALITY", "Observation quality control checked against teqc, and RTCM carrier-phase lock-time indicators cross-checked against an RTKLIB convbin decode."],
   ["EARTH ORIENTATION", "IERS Earth-orientation parameters applied for a faithful ITRS realization."],
 ];
 function buildValidation() {
