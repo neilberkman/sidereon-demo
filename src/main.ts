@@ -1345,7 +1345,7 @@ const CAP_CARDS: [string, string][] = [
   ["TERRAIN", "DTED terrain-elevation lookup with one-call tile fetch for observer and target heights."],
   ["ATMOSPHERE", "Troposphere (Saastamoinen with Niell/VMF mapping) and ionosphere (Klobuchar, IONEX maps, and Galileo NeQuick-G) path delays."],
   ["RINEX", "Observation, navigation, and clock files parsed across RINEX 3 and 4, including CNAV and CNAV2 broadcast messages."],
-  ["QUALITY CONTROL", "A quality pass over observation data: per-satellite and per-signal completeness, gaps, cycle slips, multipath, and signal strength, with RINEX lint and repair, checked against teqc."],
+  ["QUALITY CONTROL", "A quality pass over observation data: per-satellite and per-signal completeness, data gaps, and signal-strength (SNR and SSI) statistics, plus a coded RINEX lint with typed spec-conformance findings and mechanical repair, cross-checked against an independent oracle on real IGS stations."],
   ["RTCM", "Real-time RTCM 3.x correction streams: MSM observations, station coordinates, and broadcast ephemeris, decoded and re-encoded, with carrier-phase lock-time indicators mapped to RINEX loss-of-lock the way real converters should."],
   ["NTRIP", "Streaming NTRIP caster client that feeds those RTCM corrections straight into the solve, with NMEA receiver output parsed on the way in."],
   ["SSR / HAS", "State-space orbit, clock, and code and phase bias corrections from real-time SSR and Galileo HAS streams."],
@@ -1370,7 +1370,7 @@ const VALID_CARDS: [string, string][] = [
   ["SGP4", "Propagation matched against the Vallado and CelesTrak verification vectors."],
   ["FRAMES & TIME", "TEME / GCRS / ITRS transforms checked against Skyfield and the IAU conventions, with EGM96 geoid undulations matched to PROJ."],
   ["POSITIONING", "Solved against real IGS precise products and a committed parity trace to sub-micron agreement."],
-  ["GNSS DATA QUALITY", "Observation quality control checked against teqc, and RTCM carrier-phase lock-time indicators cross-checked against an RTKLIB convbin decode."],
+  ["GNSS DATA QUALITY", "Observation quality control cross-checked against an independent extraction oracle on real IGS multi-GNSS stations, and RTCM carrier-phase lock-time indicators cross-checked against an RTKLIB convbin decode."],
   ["EARTH ORIENTATION", "IERS Earth-orientation parameters applied for a faithful ITRS realization."],
 ];
 function buildValidation() {
