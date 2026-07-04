@@ -1355,6 +1355,8 @@ const CAP_CARDS: [string, string][] = [
   ["CONJUNCTION", "Close-approach screening with collision probability, plus reading and writing CCSDS messages: CDM, OMM, OEM, and OPM."],
   ["ANTEX", "Antenna phase-center offsets and variation patterns from ANTEX."],
   ["DOP", "Geometric dilution of precision from receiver-satellite line-of-sight geometry."],
+  ["SOURCE LOCALIZATION", "Locate an emission event (acoustic, seismic, or RF) from arrival times at a network of known sensors: robust time-of-arrival and TDOA multilateration with a closed-form initializer, a generalized dilution-of-precision, and a Cramer-Rao bound for sensor-placement analysis."],
+  ["ESTIMATION PRIMITIVES", "Tracking and detection building blocks: alpha-beta and scalar-Kalman level-and-rate filters, innovation gating with NIS monitoring, robust MAD and EWMA statistics, and constant-false-alarm-rate detection thresholds."],
   ["PASSES", "Acquisition and loss-of-signal pass prediction with azimuth, elevation, and range, from TLEs or precise SP3 orbits."],
   ["APPARENT PLACES", "Apparent right ascension and declination with topocentric azimuth and elevation for the Sun, Moon, and planets from any observer, plus angular separation and position angle."],
   ["ALMANAC", "Equinoxes, solstices, moon phases, planetary oppositions and conjunctions, meridian transits, and solar and lunar eclipse search."],
