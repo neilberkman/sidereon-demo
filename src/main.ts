@@ -1335,7 +1335,7 @@ const CAP_CARDS: [string, string][] = [
   ["PPP", "Precise point positioning with a full correction stack: tides, phase wind-up, and satellite antenna offsets."],
   ["DGNSS", "Differential positioning from a reference station's pseudorange corrections."],
   ["SBAS", "Satellite-based augmentation corrections for ranging and integrity."],
-  ["INTEGRITY", "RAIM and fault detection-and-exclusion with chi-square testing across the measurement set, and multi-constellation ARAIM: MHSS horizontal and vertical protection levels for LPV-200 approach integrity."],
+  ["INTEGRITY", "RAIM and fault detection-and-exclusion with chi-square testing across the measurement set, and multi-constellation ARAIM: MHSS horizontal and vertical protection levels for LPV-200 approach integrity; plus weak-geometry observability classification that rejects rank-deficient solves and flags zero-redundancy or near-singular geometry with a truthful, unvalidated bound instead of false confidence."],
   ["SGP4", "Two-line element propagation in the TEME frame, batched and parallelized across epochs to sweep a whole constellation fast."],
   ["ORBITAL DECAY", "Atmospheric-drag modeling with orbital-lifetime and reentry estimation, driven by space-weather indices."],
   ["IOD", "Initial orbit determination from three position or angle-only observations (Gibbs, Herrick-Gibbs, Gauss)."],
