@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-07-02T14:43:21.352Z",
+  "fetchedAt": "2026-07-04T16:55:18.322Z",
   "refreshed": [
     "global.ionex"
   ],
@@ -9,6 +9,6 @@
     "glo-ops.tle",
     "beidou.tle"
   ],
-  "tleEpoch": "2026-06-30T11:52:40.397Z",
-  "ionex": "COD0OPSFIN_20261780000_01D_01H_GIM"
+  "tleEpoch": "2026-07-02T17:15:42.291Z",
+  "ionex": "COD0OPSFIN_20261800000_01D_01H_GIM"
 }
