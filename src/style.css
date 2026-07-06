@@ -2311,4 +2311,37 @@ body.globe-focus .overlay-card {
   body.globe-hero .hero-copy {
     pointer-events: auto;
   }
+  /* Tap-to-engage: on phones the live stage fills most of the viewport, so
+     letting it claim one-finger drags by default traps page scroll (there is
+     no gutter left to scroll with). The stage starts inert - touches scroll
+     the page - until the user taps the engage chip; disengaging (chip again,
+     or scrolling the section away) hands touches back to the page. */
+  body.globe-live:not(.globe-engaged) main {
+    pointer-events: auto;
+  }
+  body.globe-live .globe-engage {
+    display: block;
+  }
+}
+.globe-engage {
+  display: none;
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 26px;
+  z-index: 72;
+  padding: 10px 18px;
+  border: 1px solid var(--teal, #2de0c0);
+  border-radius: 999px;
+  background: rgba(10, 14, 16, 0.92);
+  color: var(--teal, #2de0c0);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  pointer-events: auto;
+}
+body.globe-engaged .globe-engage {
+  border-color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.85);
 }

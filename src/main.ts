@@ -376,10 +376,28 @@ function startLoop() {
   const coarsePointer = window.matchMedia ? window.matchMedia("(pointer: coarse)").matches : false;
   const minFrameMs = coarsePointer ? 1000 / 40 : 0;
   let lastFrame = 0;
+  // Hold globe repaints while a touch scroll is in flight so the compositor
+  // never competes with WebGL for the main thread mid-gesture. Engaged
+  // (tap-to-orbit) means the user is driving the globe, not scrolling, so
+  // rendering continues.
+  let lastScrollT = 0;
+  if (coarsePointer) {
+    window.addEventListener("scroll", () => {
+      lastScrollT = performance.now();
+    }, { passive: true });
+  }
   const loop = () => {
     raf = 0;
     if (document.hidden || !globeOnscreen) return;
     const t = performance.now();
+    if (
+      coarsePointer &&
+      !document.body.classList.contains("globe-engaged") &&
+      t - lastScrollT < 160
+    ) {
+      raf = requestAnimationFrame(loop);
+      return;
+    }
     if (minFrameMs && t - lastFrame < minFrameMs) {
       raf = requestAnimationFrame(loop);
       return;
@@ -425,6 +443,18 @@ function startLoop() {
     updateSkyLoopState();
     start();
   });
+  const engageBtn = document.getElementById("globe-engage");
+  const setEngaged = (on: boolean) => {
+    document.body.classList.toggle("globe-engaged", on);
+    if (engageBtn) {
+      engageBtn.textContent = on ? "Done \u00b7 back to scrolling" : "Tap to orbit the globe";
+    }
+  };
+  if (engageBtn) {
+    engageBtn.addEventListener("click", () => {
+      setEngaged(!document.body.classList.contains("globe-engaged"));
+    });
+  }
   const globeIo = new IntersectionObserver(
     (entries) => {
       globeOnscreen = entries.some((e) => e.isIntersecting);
@@ -433,6 +463,7 @@ function startLoop() {
         start();
       } else {
         stop();
+        setEngaged(false);
       }
     },
     { threshold: 0.01 },
@@ -1335,38 +1366,39 @@ const CAP_CARDS: [string, string][] = [
   ["PPP", "Precise point positioning with a full correction stack: tides, phase wind-up, and satellite antenna offsets."],
   ["DGNSS", "Differential positioning from a reference station's pseudorange corrections."],
   ["SBAS", "Satellite-based augmentation corrections for ranging and integrity."],
-  ["INTEGRITY", "RAIM and fault detection-and-exclusion, multi-constellation ARAIM (MHSS protection levels for LPV-200), SBAS protection levels per DO-229, weak-geometry observability classification on every solve, per-observation reliability (minimal detectable bias, internal and external, with zero-redundancy observations reported uncheckable), and covariance-derived error bounds (CEP, R95, SEP, error ellipse) that stay wide or flagged for weak geometry instead of manufacturing confidence."],
-  ["SGP4", "Two-line element propagation in the TEME frame, batched and parallelized across epochs to sweep a whole constellation fast."],
-  ["ORBITAL DECAY", "Atmospheric-drag modeling with orbital-lifetime and reentry estimation, driven by space-weather indices."],
-  ["FORCE MODELS", "Composable perturbation forces for numerical propagation: zonal harmonics through J6, Sun and Moon third-body attraction, cannonball solar radiation pressure with conical shadow, relativistic correction, and NRLMSISE-00 drag, each validated against its published closed form."],
-  ["ORBIT FIT", "Batch least-squares fit of the numerical propagator to precise ephemerides, reporting a per-satellite radial/along-track/cross-track residual ledger; sparse arcs report an unbounded covariance instead of a fabricated fit."],
-  ["IOD", "Initial orbit determination from three position or angle-only observations (Gibbs, Herrick-Gibbs, Gauss)."],
-  ["ELEMENTS", "State-vector to classical orbital-element conversion, plus reduced-orbit fitting and TLE mean-element fitting, with mean, eccentric, and true anomaly conversions and equinoctial elements."],
-  ["RELATIVE MOTION", "RIC, RTN, and LVLH relative frames with Clohessy-Wiltshire rendezvous between two spacecraft."],
-  ["FRAMES + TIME", "TEME, GCRS, and ITRS transforms with IAU time scales and Earth orientation; geoid undulation and orthometric heights."],
-  ["CLOCK STABILITY", "Allan-family frequency stability for receiver and reference clocks: overlapping and modified Allan deviation, Hadamard deviation, and time deviation, with per-octave power-law noise identification and a five-coefficient fit, per IEEE-1139."],
-  ["TERRAIN", "DTED terrain-elevation lookup with one-call tile fetch for observer and target heights, returned as orthometric heights with explicit, fail-closed conversion to ellipsoidal height through the EGM96 geoid."],
-  ["ATMOSPHERE", "Troposphere (Saastamoinen with Niell/VMF mapping) and ionosphere (Klobuchar, IONEX maps, and Galileo NeQuick-G) path delays."],
+  ["INTEGRITY", "RAIM and fault detection-and-exclusion, multi-constellation ARAIM (MHSS protection levels for LPV-200), and SBAS protection levels per DO-229."],
+  ["ERROR BOUNDS", "Covariance-derived error bounds (CEP, R95, SEP, error ellipse) with weak-geometry observability classification on every solve and per-observation reliability (minimal detectable bias, with zero-redundancy observations reported uncheckable), so bounds stay wide or flagged instead of manufacturing confidence."],
+  ["DOP", "Geometric dilution of precision from receiver-satellite line-of-sight geometry."],
+  ["TRACK FILTERING", "A covariance-weighted track filter for position fixes, no IMU required: fixes arriving with wide covariances get low weight, so weak-geometry spikes cannot pull the track, and a fixed-interval smoother polishes the result. The same engine cleans a real phone GPS track in the companion notebook."],
+  ["GNSS/INS FUSION", "Strapdown mechanization with error-state EKF and UKF filtering: loose and tight coupling valid from a single satellite, robust updates that reweight outliers per the published schemes, and an RTS smoother. Field behavior is pinned by simulator-backed tests: fused beats GNSS-only under an outlier budget, outages coast within the IMU-grade bound, and low-satellite windows stay covariance-consistent."],
+  ["GEOFENCING", "Uncertainty-aware geodesic geofencing: containment and crossing probabilities computed from the position covariance, with hysteresis for alert stability, so fences stop lying exactly when positions are worst."],
+  ["SOURCE LOCALIZATION", "Locate an emission event (acoustic, seismic, or RF) from arrival times at a network of known sensors: robust time-of-arrival and TDOA multilateration with a closed-form initializer, a generalized dilution-of-precision, and a Cramer-Rao bound for sensor-placement analysis."],
+  ["SIDEREAL FILTERING", "Repeating-geometry multipath removal: per-satellite orbit repeat lag from the ephemeris, phase-stacked template subtraction built only from prior cycles, and a periodicity diagnostic that separates a 24h00m thermal signature from a 23h56m geometry signature in the data."],
+  ["GEODETIC TIME SERIES", "Robust station velocity by the MIDAS estimator, trajectory fitting with annual and semiannual terms and offsets, step detection, and network motion fields with common-mode removal; series too short to support a rate return a typed error, not a confident number."],
+  ["ESTIMATION PRIMITIVES", "Tracking and detection building blocks: alpha-beta and scalar-Kalman level-and-rate filters, innovation gating with NIS monitoring, robust MAD and EWMA statistics, and constant-false-alarm-rate detection thresholds."],
   ["RINEX", "Observation, navigation, and clock files parsed across RINEX 3 and 4, including CNAV and CNAV2 broadcast messages."],
   ["QUALITY CONTROL", "A teqc-style quality pass over observation data: per-satellite and per-signal completeness, data gaps, signal-strength (SNR and SSI) statistics, MP1/MP2 multipath validated against teqc, cycle-slip and clock-jump flags, and a coded RINEX lint with mechanical repair, rendered as a text, JSON, or HTML report. Reads RINEX 2, 3, 4 and Hatanaka/CRINEX."],
   ["RTCM", "Real-time RTCM 3.x correction streams: MSM observations, station coordinates, and broadcast ephemeris, decoded and re-encoded, with carrier-phase lock-time indicators mapped to RINEX loss-of-lock the way real converters should."],
   ["NTRIP", "Streaming NTRIP caster client that feeds those RTCM corrections straight into the solve, with NMEA receiver output parsed on the way in."],
   ["SSR / HAS", "State-space orbit, clock, and code and phase bias corrections from real-time SSR and Galileo HAS streams."],
-  ["SPK", "JPL/NAIF SPK (.bsp) ephemeris kernels with precise state interpolation for planets and spacecraft."],
-  ["COVARIANCE", "Six-by-six orbit covariance propagation with process noise and frame transport, feeding the collision-probability integration."],
-  ["CONJUNCTION", "Close-approach screening with collision probability, plus reading and writing CCSDS messages: CDM, OMM, OEM, and OPM."],
   ["ANTEX", "Antenna phase-center offsets and variation patterns from ANTEX."],
-  ["DOP", "Geometric dilution of precision from receiver-satellite line-of-sight geometry."],
-  ["SOURCE LOCALIZATION", "Locate an emission event (acoustic, seismic, or RF) from arrival times at a network of known sensors: robust time-of-arrival and TDOA multilateration with a closed-form initializer, a generalized dilution-of-precision, and a Cramer-Rao bound for sensor-placement analysis."],
-  ["TRACK FILTERING", "A covariance-weighted track filter for position fixes, no IMU required: fixes arriving with wide covariances get low weight, so weak-geometry spikes cannot pull the track, and a fixed-interval smoother polishes the result. The same engine cleans a real phone GPS track in the companion notebook."],
-  ["GEOFENCING", "Uncertainty-aware geodesic geofencing: containment and crossing probabilities computed from the position covariance, with hysteresis for alert stability, so fences stop lying exactly when positions are worst."],
+  ["ATMOSPHERE", "Troposphere (Saastamoinen with Niell/VMF mapping) and ionosphere (Klobuchar, IONEX maps, and Galileo NeQuick-G) path delays."],
+  ["TERRAIN", "DTED terrain-elevation lookup with one-call tile fetch for observer and target heights, returned as orthometric heights with explicit, fail-closed conversion to ellipsoidal height through the EGM96 geoid."],
+  ["GEODESY", "Geodesic direct and inverse problems on the WGS84 ellipsoid after Karney, robust through antipodal and near-conjugate cases, an epoch-aware terrestrial reference frame catalog with published ITRF and ETRF Helmert parameter sets, and EGM2008 geoid grids alongside EGM96."],
+  ["FRAMES + TIME", "TEME, GCRS, and ITRS transforms with IAU time scales and Earth orientation; geoid undulation and orthometric heights."],
+  ["CLOCK STABILITY", "Allan-family frequency stability for receiver and reference clocks: overlapping and modified Allan deviation, Hadamard deviation, and time deviation, with per-octave power-law noise identification and a five-coefficient fit, per IEEE-1139."],
   ["SCENARIO SIMULATION", "A deterministic scenario simulator with a per-term error budget: bit-reproducible synthetic observables plus a ground-truth ledger that attributes every metre of solver error to clock, ionosphere, troposphere, noise, or multipath."],
   ["SIGNAL ANALYSIS", "Closed-form navigation-signal figures of merit: BPSK and BOC spectra, spectral separation coefficients, DLL thermal-noise jitter, and multipath error envelopes, validated against published constants."],
-  ["GEODESY", "Geodesic direct and inverse problems on the WGS84 ellipsoid after Karney, robust through antipodal and near-conjugate cases, an epoch-aware terrestrial reference frame catalog with published ITRF and ETRF Helmert parameter sets, and EGM2008 geoid grids alongside EGM96."],
-  ["GNSS/INS FUSION", "Strapdown mechanization with error-state EKF and UKF filtering: loose and tight coupling valid from a single satellite, robust updates that reweight outliers per the published schemes, and an RTS smoother. Field behavior is pinned by simulator-backed tests: fused beats GNSS-only under an outlier budget, outages coast within the IMU-grade bound, and low-satellite windows stay covariance-consistent."],
-  ["GEODETIC TIME SERIES", "Robust station velocity by the MIDAS estimator, trajectory fitting with annual and semiannual terms and offsets, step detection, and network motion fields with common-mode removal; series too short to support a rate return a typed error, not a confident number."],
-  ["SIDEREAL FILTERING", "Repeating-geometry multipath removal: per-satellite orbit repeat lag from the ephemeris, phase-stacked template subtraction built only from prior cycles, and a periodicity diagnostic that separates a 24h00m thermal signature from a 23h56m geometry signature in the data."],
-  ["ESTIMATION PRIMITIVES", "Tracking and detection building blocks: alpha-beta and scalar-Kalman level-and-rate filters, innovation gating with NIS monitoring, robust MAD and EWMA statistics, and constant-false-alarm-rate detection thresholds."],
+  ["SGP4", "Two-line element propagation in the TEME frame, batched and parallelized across epochs to sweep a whole constellation fast."],
+  ["FORCE MODELS", "Composable perturbation forces for numerical propagation: zonal harmonics through J6, Sun and Moon third-body attraction, cannonball solar radiation pressure with conical shadow, relativistic correction, and NRLMSISE-00 drag, each validated against its published closed form."],
+  ["ORBITAL DECAY", "Atmospheric-drag modeling with orbital-lifetime and reentry estimation, driven by space-weather indices."],
+  ["ORBIT FIT", "Batch least-squares fit of the numerical propagator to precise ephemerides, reporting a per-satellite radial/along-track/cross-track residual ledger; sparse arcs report an unbounded covariance instead of a fabricated fit."],
+  ["IOD", "Initial orbit determination from three position or angle-only observations (Gibbs, Herrick-Gibbs, Gauss)."],
+  ["ELEMENTS", "State-vector to classical orbital-element conversion, plus reduced-orbit fitting and TLE mean-element fitting, with mean, eccentric, and true anomaly conversions and equinoctial elements."],
+  ["RELATIVE MOTION", "RIC, RTN, and LVLH relative frames with Clohessy-Wiltshire rendezvous between two spacecraft."],
+  ["COVARIANCE", "Six-by-six orbit covariance propagation with process noise and frame transport, feeding the collision-probability integration."],
+  ["CONJUNCTION", "Close-approach screening with collision probability, plus reading and writing CCSDS messages: CDM, OMM, OEM, and OPM."],
+  ["SPK", "JPL/NAIF SPK (.bsp) ephemeris kernels with precise state interpolation for planets and spacecraft."],
   ["PASSES", "Acquisition and loss-of-signal pass prediction with azimuth, elevation, and range, from TLEs or precise SP3 orbits."],
   ["APPARENT PLACES", "Apparent right ascension and declination with topocentric azimuth and elevation for the Sun, Moon, and planets from any observer, plus angular separation and position angle."],
   ["ALMANAC", "Equinoxes, solstices, moon phases, planetary oppositions and conjunctions, meridian transits, and solar and lunar eclipse search."],
