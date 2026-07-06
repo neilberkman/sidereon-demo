@@ -1358,6 +1358,7 @@ const CAP_CARDS: [string, string][] = [
   ["ANTEX", "Antenna phase-center offsets and variation patterns from ANTEX."],
   ["DOP", "Geometric dilution of precision from receiver-satellite line-of-sight geometry."],
   ["SOURCE LOCALIZATION", "Locate an emission event (acoustic, seismic, or RF) from arrival times at a network of known sensors: robust time-of-arrival and TDOA multilateration with a closed-form initializer, a generalized dilution-of-precision, and a Cramer-Rao bound for sensor-placement analysis."],
+  ["TRACK FILTERING", "A covariance-weighted track filter for position fixes, no IMU required: fixes arriving with wide covariances get low weight, so weak-geometry spikes cannot pull the track, and a fixed-interval smoother polishes the result. The same engine cleans a real phone GPS track in the companion notebook."],
   ["GEOFENCING", "Uncertainty-aware geodesic geofencing: containment and crossing probabilities computed from the position covariance, with hysteresis for alert stability, so fences stop lying exactly when positions are worst."],
   ["SCENARIO SIMULATION", "A deterministic scenario simulator with a per-term error budget: bit-reproducible synthetic observables plus a ground-truth ledger that attributes every metre of solver error to clock, ionosphere, troposphere, noise, or multipath."],
   ["SIGNAL ANALYSIS", "Closed-form navigation-signal figures of merit: BPSK and BOC spectra, spectral separation coefficients, DLL thermal-noise jitter, and multipath error envelopes, validated against published constants."],
