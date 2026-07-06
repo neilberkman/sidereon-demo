@@ -390,11 +390,7 @@ function startLoop() {
     raf = 0;
     if (document.hidden || !globeOnscreen) return;
     const t = performance.now();
-    if (
-      coarsePointer &&
-      !document.body.classList.contains("globe-engaged") &&
-      t - lastScrollT < 160
-    ) {
+    if (coarsePointer && t - lastScrollT < 160) {
       raf = requestAnimationFrame(loop);
       return;
     }
@@ -443,18 +439,6 @@ function startLoop() {
     updateSkyLoopState();
     start();
   });
-  const engageBtn = document.getElementById("globe-engage");
-  const setEngaged = (on: boolean) => {
-    document.body.classList.toggle("globe-engaged", on);
-    if (engageBtn) {
-      engageBtn.textContent = on ? "Done \u00b7 back to scrolling" : "Tap to orbit the globe";
-    }
-  };
-  if (engageBtn) {
-    engageBtn.addEventListener("click", () => {
-      setEngaged(!document.body.classList.contains("globe-engaged"));
-    });
-  }
   const globeIo = new IntersectionObserver(
     (entries) => {
       globeOnscreen = entries.some((e) => e.isIntersecting);
@@ -463,7 +447,6 @@ function startLoop() {
         start();
       } else {
         stop();
-        setEngaged(false);
       }
     },
     { threshold: 0.01 },
