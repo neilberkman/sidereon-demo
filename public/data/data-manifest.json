@@ -1,13 +1,14 @@
 {
-  "fetchedAt": "2026-07-05T19:13:50.560Z",
+  "fetchedAt": "2026-07-06T00:24:26.775Z",
   "refreshed": [
+    "global.ionex"
+  ],
+  "kept": [
     "gps-ops.tle",
     "galileo.tle",
     "glo-ops.tle",
-    "beidou.tle",
-    "global.ionex"
+    "beidou.tle"
   ],
-  "kept": [],
   "tleEpoch": "2026-07-04T17:22:39.622Z",
   "ionex": "COD0OPSFIN_20261820000_01D_01H_GIM"
 }
