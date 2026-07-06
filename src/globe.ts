@@ -199,21 +199,7 @@ export class Globe {
     // scroll simply starts outside the docked globe. Desktop (fine pointer) keeps
     // native scroll over the fixed canvas with `auto`; mouse drag-to-rotate uses
     // pointer events and is unaffected either way.
-    // Touch policy (third iteration, keep the history): `pan-y` made elevation
-    // un-draggable; claiming one-finger with `touch-action: none` trapped page
-    // scroll because the stage fills a phone viewport; a tap-to-engage chip
-    // solved neither and added chrome. The embedded-map standard wins: ONE
-    // finger always belongs to the page (scroll), TWO fingers orbit the globe.
-    // `pan-x pan-y` hands single-finger pans to the browser scroller natively
-    // while multi-touch still reaches OrbitControls, whose one-finger handler
-    // is disabled outright.
-    if (this.profile.coarsePointer) {
-      this.renderer.domElement.style.touchAction = "pan-x pan-y";
-      this.controls.touches.ONE = null as unknown as THREE.TOUCH;
-      this.controls.touches.TWO = THREE.TOUCH.ROTATE;
-    } else {
-      this.renderer.domElement.style.touchAction = "auto";
-    }
+    this.renderer.domElement.style.touchAction = this.profile.coarsePointer ? "none" : "auto";
     // WebKit-specific scroll "tug": OrbitControls registers a NON-PASSIVE `wheel`
     // listener (`{ passive: false }`) on the canvas for zoom. WebKit decides the
     // scroll path purely on the PRESENCE of a non-passive wheel listener on the

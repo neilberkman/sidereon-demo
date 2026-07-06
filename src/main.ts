@@ -376,24 +376,10 @@ function startLoop() {
   const coarsePointer = window.matchMedia ? window.matchMedia("(pointer: coarse)").matches : false;
   const minFrameMs = coarsePointer ? 1000 / 40 : 0;
   let lastFrame = 0;
-  // Hold globe repaints while a touch scroll is in flight so the compositor
-  // never competes with WebGL for the main thread mid-gesture. Engaged
-  // (tap-to-orbit) means the user is driving the globe, not scrolling, so
-  // rendering continues.
-  let lastScrollT = 0;
-  if (coarsePointer) {
-    window.addEventListener("scroll", () => {
-      lastScrollT = performance.now();
-    }, { passive: true });
-  }
   const loop = () => {
     raf = 0;
     if (document.hidden || !globeOnscreen) return;
     const t = performance.now();
-    if (coarsePointer && t - lastScrollT < 160) {
-      raf = requestAnimationFrame(loop);
-      return;
-    }
     if (minFrameMs && t - lastFrame < minFrameMs) {
       raf = requestAnimationFrame(loop);
       return;

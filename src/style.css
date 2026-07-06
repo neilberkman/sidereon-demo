@@ -2306,17 +2306,6 @@ body.globe-focus .overlay-card {
    hero copy rotates the backdrop instead of scrolling. Keep the hero content
    clickable and scrollable here; body.globe-live still routes only the live
    stage box to the globe, so rotation in the live demo is unaffected. */
-.hint-coarse {
-  display: none;
-}
-@media (pointer: coarse) {
-  .hint-fine {
-    display: none;
-  }
-  .hint-coarse {
-    display: block;
-  }
-}
 @media (pointer: coarse) {
   body.globe-hero main,
   body.globe-hero .hero-copy {
