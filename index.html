@@ -296,14 +296,14 @@
               <div class="rtk-stage">
                 <canvas id="rtk-canvas" class="rtk-canvas"></canvas>
                 <div class="rtk-legend" aria-label="RTK plot layers">
-                  <span><i class="float"></i>FLOAT ARC</span>
+                  <span><i class="float"></i>FLOAT · PER EPOCH</span>
                   <span><i class="fixed"></i>FIXED</span>
                   <span><i class="truth"></i>TRUTH</span>
                 </div>
               </div>
               <div class="rtk-side">
                 <div class="subhead">WTZR / WTZZ · 40 EPOCH RINEX + SP3</div>
-                <div class="rtk-explainer">Parsed, differenced, floated, then wide-lane fixed by the WASM engine in this tab.</div>
+                <div class="rtk-explainer">Parsed, differenced, floated epoch by epoch (the teal path is the float estimate converging on truth), then wide-lane fixed by the WASM engine in this tab.</div>
                 <div class="rtk-controls">
                   <button class="track-btn" id="rtk-run" type="button">RUN RTK</button>
                   <span class="rtk-status-badge" id="rtk-status">IDLE</span>

@@ -983,19 +983,35 @@ function drawSolveScatterCanvas(canvas: HTMLCanvasElement, points: SolveScatterP
 
   const cx = rect.width * 0.5;
   const cy = rect.height * 0.5;
-  const pad = 28;
-  const maxHorizontal = Math.max(
-    4,
-    ...points.map((point) => Math.hypot(point.eastM, point.northM)),
-  );
-  const scale = (Math.min(rect.width, rect.height) * 0.5 - pad) / maxHorizontal;
+  const pad = 30;
+  const outer = Math.min(rect.width, rect.height) * 0.5 - pad;
 
-  ctx.strokeStyle = "rgba(53, 224, 216, 0.08)";
+  // Log-radial target plot. The whole story of this panel is a 27 m raw error
+  // collapsing to ~2 m, which on a linear scale piles every interesting dot
+  // onto the center. Radius maps log10 of the horizontal error between a
+  // 0.3 m floor and the outermost ring, so raw and corrected fixes separate
+  // cleanly; bearing from truth stays true. Values live in the legend, never
+  // on the canvas, so nothing can collide.
+  const maxError = Math.max(...points.map((point) => point.errorM), 1);
+  const rings = [1, 3, 10, 30, 100].filter(
+    (ring, index, all) => ring >= 1 && (index === 0 || all[index - 1] < maxError * 1.05),
+  );
+  const floorM = 0.3;
+  const topM = rings[rings.length - 1];
+  const radiusFor = (errorM: number) =>
+    outer *
+    (Math.log10(Math.max(errorM, floorM) / floorM) / Math.log10(topM / floorM));
+
+  ctx.font = "10px IBM Plex Mono, monospace";
   ctx.lineWidth = 1;
-  for (let ring = 1; ring <= 3; ring++) {
+  for (const ring of rings) {
+    const r = radiusFor(ring);
+    ctx.strokeStyle = "rgba(53, 224, 216, 0.09)";
     ctx.beginPath();
-    ctx.arc(cx, cy, (ring / 3) * maxHorizontal * scale, 0, Math.PI * 2);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.fillStyle = "rgba(92, 122, 128, 0.8)";
+    ctx.fillText(`${ring} m`, cx + 4, cy - r + 11);
   }
   ctx.strokeStyle = "rgba(53, 224, 216, 0.36)";
   ctx.beginPath();
@@ -1005,18 +1021,18 @@ function drawSolveScatterCanvas(canvas: HTMLCanvasElement, points: SolveScatterP
   ctx.lineTo(cx, cy + 11);
   ctx.stroke();
 
-  ctx.font = "10px IBM Plex Mono, monospace";
-  ctx.fillStyle = "rgba(207, 233, 236, 0.72)";
-  ctx.fillText("TRUTH", cx + 14, cy - 9);
   ctx.fillStyle = "rgba(92, 122, 128, 0.85)";
-  ctx.fillText(`${Math.ceil(maxHorizontal)} m EN`, 10, 17);
+  ctx.fillText("TRUTH AT CENTER · LOG RADIAL", 10, 17);
   ctx.fillText("E", rect.width - 18, cy - 6);
   ctx.fillText("N", cx + 6, 14);
 
   for (const point of points) {
-    const x = cx + point.eastM * scale;
-    const y = cy - point.northM * scale;
-    ctx.strokeStyle = "rgba(207, 233, 236, 0.18)";
+    const horiz = Math.hypot(point.eastM, point.northM);
+    const r = radiusFor(Math.max(point.errorM, horiz > 0 ? horiz : point.errorM));
+    const angle = horiz > 0 ? Math.atan2(point.northM, point.eastM) : Math.PI / 2;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy - Math.sin(angle) * r;
+    ctx.strokeStyle = "rgba(207, 233, 236, 0.14)";
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(x, y);
@@ -1028,11 +1044,30 @@ function drawSolveScatterCanvas(canvas: HTMLCanvasElement, points: SolveScatterP
     ctx.arc(x, y, point.active ? 5.5 : 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = point.active ? "#eafcff" : "rgba(207, 233, 236, 0.78)";
-    ctx.fillText(point.label, x + 8, y - 7);
-    if (point.active || point.key === "none" || point.key === "both") {
-      ctx.fillStyle = "rgba(159, 196, 200, 0.82)";
-      ctx.fillText(fmtLen(point.errorM), x + 8, y + 8);
+  }
+  updateSolveScatterKeys(points);
+}
+
+// The legend rows carry the live numbers so the canvas never draws colliding
+// text: "RAW 27.06 m" reads better in a row than stacked over the dots.
+function updateSolveScatterKeys(points: SolveScatterPoint[]): void {
+  for (const keyBox of document.querySelectorAll<HTMLElement>(".solve-scatter-key")) {
+    for (const span of keyBox.querySelectorAll<HTMLElement>("span")) {
+      const marker = span.querySelector("i");
+      if (!marker) continue;
+      const key = marker.className as SolveScatterPoint["key"];
+      const point = points.find((p) => p.key === key);
+      if (!point) continue;
+      const text = `${point.label} ${fmtLen(point.errorM)}`;
+      if (span.dataset.keyText !== text) {
+        span.dataset.keyText = text;
+        marker.insertAdjacentText("afterend", "");
+        span.childNodes.forEach((n) => {
+          if (n.nodeType === Node.TEXT_NODE) n.remove();
+        });
+        span.appendChild(document.createTextNode(text));
+      }
+      span.classList.toggle("active", point.active);
     }
   }
 }
@@ -1627,17 +1662,27 @@ function drawRtkCanvas(progress = 1): void {
 
   if (!rtkResult || rtkConvergence.length === 0) return;
   const shown = Math.max(1, Math.floor(rtkConvergence.length * Math.max(0, Math.min(1, progress))));
-  ctx.strokeStyle = "rgba(53, 224, 216, 0.72)";
+  // Segment-by-segment alpha ramp: the earliest float epochs draw faint and
+  // the newest bright, so the wander reads as convergence toward the fix
+  // rather than as noise.
   ctx.lineWidth = 1.4;
-  ctx.beginPath();
+  let prevX = 0;
+  let prevY = 0;
   for (let i = 0; i < shown; i++) {
     const point = rtkConvergence[i];
     const x = cx + (point.baselineM[0] - rtkResult.truthBaselineM[0]) * scale;
     const y = cy - (point.baselineM[1] - rtkResult.truthBaselineM[1]) * scale;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (i > 0) {
+      const t = i / Math.max(1, rtkConvergence.length - 1);
+      ctx.strokeStyle = `rgba(53, 224, 216, ${(0.16 + 0.6 * t).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(prevX, prevY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+    prevX = x;
+    prevY = y;
   }
-  ctx.stroke();
 
   const last = rtkConvergence[shown - 1];
   const lx = cx + (last.baselineM[0] - rtkResult.truthBaselineM[0]) * scale;
