@@ -17,8 +17,17 @@ import init, {
   ecefToGeodetic,
   GnssSystem,
   SignalPolicy,
+  loadSp3,
+  loadRinexObs,
+  buildRinexRtkArc,
+  buildDualFrequencyRinexRtkArc,
+  solveRtkArc,
+  solveStaticRinexRtkBaseline,
+  solveWideLaneFixedRinexRtkBaseline,
   type Ionex,
   type BroadcastEphemeris,
+  type RinexObs,
+  type Sp3,
 } from "@neilberkman/sidereon";
 import type { Constellation } from "./colors";
 
@@ -702,6 +711,246 @@ export function solveSpp(
   const sol = data.nav.solveBroadcast(request);
   const fineMs = performance.now() - t1;
   return buildResult(data, sol, corrections, fineMs, elevationMaskDeg);
+}
+
+// ---- RTK browser demo against bundled WTZR/WTZZ RINEX + SP3 ---------------
+
+export interface RtkAssetBundle {
+  sp3Bytes: Uint8Array;
+  baseObsBytes: Uint8Array;
+  roverObsBytes: Uint8Array;
+  provenance: {
+    sp3File: string;
+    baseObsFile: string;
+    roverObsFile: string;
+    sp3Bytes: number;
+    baseObsBytes: number;
+    roverObsBytes: number;
+    totalBytes: number;
+    sp3Sha256: string;
+    baseObsSha256: string;
+    roverObsSha256: string;
+    source: string;
+  };
+}
+
+export interface RtkConvergenceEpoch {
+  epochIndex: number;
+  baselineM: [number, number, number];
+}
+
+export interface RtkDemoResult {
+  epochs: number;
+  sp3Epochs: number;
+  baseStation: string;
+  roverStation: string;
+  baseArpM: [number, number, number];
+  roverArpM: [number, number, number];
+  truthBaselineM: [number, number, number];
+  truthLengthM: number;
+  floatBaselineM: [number, number, number];
+  floatErrorM: number;
+  fixedBaselineM: [number, number, number];
+  fixedErrorM: number;
+  fixedStatus: string;
+  fixedRatio: number | undefined;
+  wideLaneCount: number;
+  convergence: RtkConvergenceEpoch[];
+  wallMs: number;
+  buildMs: number;
+  floatMs: number;
+  fixedMs: number;
+}
+
+const RTK_ASSETS = {
+  sp3: "/data/rtk/GBM0MGXRAP_20201770000_01D_05M_ORB_6epoch.sp3",
+  baseObs: "/data/rtk/WTZR00DEU_R_20201770000_01D_30S_MO_40epoch.rnx",
+  roverObs: "/data/rtk/WTZZ00DEU_R_20201770000_01D_30S_MO_40epoch.rnx",
+};
+
+// Published ITRF2020 marker coordinates from the WTZR/WTZZ fixture provenance.
+// The app computes the antenna-reference-point truth from these markers plus
+// the parsed RINEX ANTENNA: DELTA H/E/N heights, then compares the solved
+// baseline against that computed vector.
+const WTZR_MARKER_ECEF_M: [number, number, number] = [4075580.3111, 931854.0543, 4801568.2808];
+const WTZZ_MARKER_ECEF_M: [number, number, number] = [4075579.1913, 931853.3696, 4801569.1897];
+
+const RTK_ARC_OPTIONS = { maxEpochs: 40, includePredictionTime: false };
+const RTK_MODEL = {
+  codeSigmaM: 2.0,
+  phaseSigmaM: 0.01,
+  sagnac: true,
+  stochastic: "simple",
+  elevationWeighting: true,
+};
+const RTK_SOLVE_OPTIONS = {
+  positionTolM: 1.0e-4,
+  ambiguityTolM: 1.0e-4,
+  maxIterations: 10,
+};
+
+async function loadBytes(url: string): Promise<Uint8Array> {
+  return new Uint8Array(await (await okFetch(url)).arrayBuffer());
+}
+
+export async function loadRtkAssets(): Promise<RtkAssetBundle> {
+  const [sp3Bytes, baseObsBytes, roverObsBytes] = await Promise.all([
+    loadBytes(RTK_ASSETS.sp3),
+    loadBytes(RTK_ASSETS.baseObs),
+    loadBytes(RTK_ASSETS.roverObs),
+  ]);
+  const [sp3Sha256, baseObsSha256, roverObsSha256] = await Promise.all([
+    sha256Hex(sp3Bytes),
+    sha256Hex(baseObsBytes),
+    sha256Hex(roverObsBytes),
+  ]);
+  return {
+    sp3Bytes,
+    baseObsBytes,
+    roverObsBytes,
+    provenance: {
+      sp3File: RTK_ASSETS.sp3.split("/").pop()!,
+      baseObsFile: RTK_ASSETS.baseObs.split("/").pop()!,
+      roverObsFile: RTK_ASSETS.roverObs.split("/").pop()!,
+      sp3Bytes: sp3Bytes.byteLength,
+      baseObsBytes: baseObsBytes.byteLength,
+      roverObsBytes: roverObsBytes.byteLength,
+      totalBytes: sp3Bytes.byteLength + baseObsBytes.byteLength + roverObsBytes.byteLength,
+      sp3Sha256,
+      baseObsSha256,
+      roverObsSha256,
+      source: "IGS MGEX / EPN public WTZR-WTZZ 2020-06-25 trims",
+    },
+  };
+}
+
+function vec3From(values: ArrayLike<number>): [number, number, number] {
+  return [values[0], values[1], values[2]];
+}
+
+function subVec3(a: ArrayLike<number>, b: ArrayLike<number>): [number, number, number] {
+  return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+}
+
+function vecNorm(v: ArrayLike<number>): number {
+  return Math.hypot(v[0], v[1], v[2]);
+}
+
+function antennaHeightM(obs: RinexObs): number {
+  const hen = obs.header.antennaDeltaHenM;
+  if (!hen) throw new Error("RTK RINEX missing antenna height");
+  const [heightM, eastM, northM] = hen;
+  if (eastM !== 0 || northM !== 0) throw new Error("RTK demo expects zero east/north antenna offsets");
+  return heightM;
+}
+
+function arpPosition(markerM: [number, number, number], obs: RinexObs): [number, number, number] {
+  const heightM = antennaHeightM(obs);
+  const radiusM = vecNorm(markerM);
+  return [
+    markerM[0] + (markerM[0] / radiusM) * heightM,
+    markerM[1] + (markerM[1] / radiusM) * heightM,
+    markerM[2] + (markerM[2] / radiusM) * heightM,
+  ];
+}
+
+function vectorErrorM(actual: ArrayLike<number>, expected: ArrayLike<number>): number {
+  return vecNorm(subVec3(actual, expected));
+}
+
+function stationName(obs: RinexObs, fallback: string): string {
+  return obs.header.markerName || fallback;
+}
+
+function solveSequentialArc(
+  singleArc: {
+    epochs: unknown[];
+    wavelengthsM: Record<string, number>;
+    offsetsM: Record<string, number>;
+  },
+  baseM: [number, number, number],
+): RtkConvergenceEpoch[] {
+  const seq = solveRtkArc(singleArc.epochs, {
+    baseM,
+    model: RTK_MODEL,
+    baselinePriorSigmaM: 100.0,
+    ambiguityPriorSigmaM: 1000.0,
+    wavelengthsM: singleArc.wavelengthsM,
+    offsetsM: singleArc.offsetsM,
+  }) as { epochs: { reportedBaselineM: number[] }[] };
+  return seq.epochs.map((epoch, epochIndex) => ({
+    epochIndex,
+    baselineM: vec3From(epoch.reportedBaselineM),
+  }));
+}
+
+export function solveRtkDemo(assets: RtkAssetBundle): RtkDemoResult {
+  const wallStart = performance.now();
+  const sp3 = loadSp3(assets.sp3Bytes) as Sp3;
+  const baseObs = loadRinexObs(assets.baseObsBytes);
+  const roverObs = loadRinexObs(assets.roverObsBytes);
+  const baseArpM = arpPosition(WTZR_MARKER_ECEF_M, baseObs);
+  const roverArpM = arpPosition(WTZZ_MARKER_ECEF_M, roverObs);
+  const truthBaselineM = subVec3(roverArpM, baseArpM);
+
+  const buildStart = performance.now();
+  const singleArc = buildRinexRtkArc(sp3, baseObs, roverObs, RTK_ARC_OPTIONS) as {
+    epochs: unknown[];
+    wavelengthsM: Record<string, number>;
+    offsetsM: Record<string, number>;
+  };
+  buildDualFrequencyRinexRtkArc(sp3, baseObs, roverObs, RTK_ARC_OPTIONS);
+  const convergence = solveSequentialArc(singleArc, baseArpM);
+  const buildMs = performance.now() - buildStart;
+
+  const floatStart = performance.now();
+  const floatSolution = solveStaticRinexRtkBaseline(sp3, baseObs, roverObs, {
+    baseM: baseArpM,
+    model: RTK_MODEL,
+    arcOptions: RTK_ARC_OPTIONS,
+    preprocessing: { cycleSlip: "splitArc" },
+    opts: { float: RTK_SOLVE_OPTIONS, fixed: RTK_SOLVE_OPTIONS },
+  }) as { floatSolution: { baselineM: number[] } };
+  const floatMs = performance.now() - floatStart;
+
+  const fixedStart = performance.now();
+  const fixedSolution = solveWideLaneFixedRinexRtkBaseline(sp3, baseObs, roverObs, {
+    baseM: baseArpM,
+    model: RTK_MODEL,
+    arcOptions: RTK_ARC_OPTIONS,
+    opts: { float: RTK_SOLVE_OPTIONS, fixed: RTK_SOLVE_OPTIONS },
+  }) as {
+    fixedBaselineM: number[];
+    integerStatus: string;
+    integerRatio?: number;
+    wideLaneAmbiguitiesCycles?: Record<string, number>;
+  };
+  const fixedMs = performance.now() - fixedStart;
+
+  const floatBaselineM = vec3From(floatSolution.floatSolution.baselineM);
+  const fixedBaselineM = vec3From(fixedSolution.fixedBaselineM);
+  return {
+    epochs: singleArc.epochs.length,
+    sp3Epochs: sp3.epochCount,
+    baseStation: stationName(baseObs, "WTZR"),
+    roverStation: stationName(roverObs, "WTZZ"),
+    baseArpM,
+    roverArpM,
+    truthBaselineM,
+    truthLengthM: vecNorm(truthBaselineM),
+    floatBaselineM,
+    floatErrorM: vectorErrorM(floatBaselineM, truthBaselineM),
+    fixedBaselineM,
+    fixedErrorM: vectorErrorM(fixedBaselineM, truthBaselineM),
+    fixedStatus: fixedSolution.integerStatus,
+    fixedRatio: fixedSolution.integerRatio,
+    wideLaneCount: Object.keys(fixedSolution.wideLaneAmbiguitiesCycles ?? {}).length,
+    convergence,
+    wallMs: performance.now() - wallStart,
+    buildMs,
+    floatMs,
+    fixedMs,
+  };
 }
 
 // ---- IONEX global vertical-TEC field ---------------------------------------

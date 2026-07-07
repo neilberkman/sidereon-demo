@@ -9,5 +9,11 @@
     "rootDir": ".",
     "outDir": ".tmp/test"
   },
-  "include": ["src/pass-labels.ts", "src/track-replay.ts", "tests/**/*.ts"]
+  "include": [
+    "src/pass-labels.ts",
+    "src/track-replay.ts",
+    "src/solve-scatter.ts",
+    "src/rtk-panel.ts",
+    "tests/**/*.ts"
+  ]
 }
