@@ -210,6 +210,28 @@ function validateTleText(text: string, label: string): string {
   return text;
 }
 
+let tleRefreshedAt: Date | null = null;
+
+// "3h ago" style relative age for the refresh manifest the daily job writes.
+function timeAgo(from: Date): string {
+  const mins = Math.max(0, Math.round((Date.now() - from.getTime()) / 60000));
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+async function loadTleRefreshManifest(): Promise<void> {
+  try {
+    const r = await okFetch("/data/tle-refresh.json");
+    const data = (await r.json()) as { refreshedAt?: string };
+    const t = data.refreshedAt ? new Date(data.refreshedAt) : null;
+    if (t && Number.isFinite(t.getTime())) tleRefreshedAt = t;
+  } catch {
+    tleRefreshedAt = null;
+  }
+}
+
 async function fetchBundledTle(file: string): Promise<string> {
   return validateTleText(await (await okFetch(`/data/${file}.tle`)).text(), file);
 }
@@ -264,7 +286,8 @@ function updateTleFreshnessFoot(sources: LoadedTleSource[]): void {
     return;
   }
   const ageDays = Math.max(0, Math.floor((Date.now() - epoch.getTime()) / 86400000));
-  foot.textContent = `TLE · CELESTRAK · DAILY REFRESH · EPOCH ${epoch.toISOString().slice(0, 10)} · ${ageDays}d OLD`;
+  const refreshed = tleRefreshedAt ? `REFRESHED ${timeAgo(tleRefreshedAt).toUpperCase()}` : "DAILY REFRESH";
+  foot.textContent = `TLE · CELESTRAK · ${refreshed} · EPOCH ${epoch.toISOString().slice(0, 10)}`;
   foot.classList.toggle("stale", ageDays >= 3);
 }
 
@@ -336,6 +359,7 @@ async function boot() {
   line(`  engine online · sidereon core · <span class="em">${initMs} ms</span>`);
   await sleep(80);
 
+  await loadTleRefreshManifest();
   line('<span class="ok">›</span> fetching real element sets · celestrak');
   const loadedTles: LoadedTleSource[] = [];
   for (const entry of CELESTRAK_GROUPS) {
@@ -344,7 +368,7 @@ async function boot() {
     tleSources.push({ text: src.text, constellation: src.constellation });
     const parsed = parseTleFile(src.text, src.constellation);
     sats = sats.concat(parsed);
-    const note = "celestrak · daily refresh";
+    const note = tleRefreshedAt ? `celestrak · refreshed ${timeAgo(tleRefreshedAt)}` : "celestrak · daily refresh";
     line(
       `  ${src.constellation.padEnd(3)} · <span class="em">${parsed.length}</span> satellites · ${note}`,
     );

@@ -28,11 +28,12 @@ jobs:
             mv "${out}.new" "${out}"
             sleep 15
           done
+          printf '{"refreshedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > public/data/tle-refresh.json
       - name: Commit if changed
         run: |
           git config user.name "tle-refresh"
           git config user.email "actions@users.noreply.github.com"
-          git add public/data/*.tle
+          git add public/data/*.tle public/data/tle-refresh.json
           git diff --cached --quiet && { echo "no changes"; exit 0; }
           git commit -m "data: daily element-set refresh"
           git push
@@ -45,7 +46,7 @@ jobs:
           k=os.environ["BUNNY_API_KEY"]
           sz=json.load(urllib.request.urlopen(urllib.request.Request("https://api.bunny.net/storagezone/1616378",headers={"AccessKey":k,"Accept":"application/json"})))
           pw=sz["Password"]; name=sz["Name"]
-          for f in glob.glob("public/data/*.tle"):
+          for f in glob.glob("public/data/*.tle") + ["public/data/tle-refresh.json"]:
               rel="data/"+os.path.basename(f); data=open(f,"rb").read()
               urllib.request.urlopen(urllib.request.Request(f"https://ny.storage.bunnycdn.com/{name}/{rel}",data=data,method="PUT",headers={"AccessKey":pw,"Content-Type":"application/octet-stream"}),timeout=120)
               got=urllib.request.urlopen(urllib.request.Request(f"https://ny.storage.bunnycdn.com/{name}/{rel}",headers={"AccessKey":pw}),timeout=120).read()
