@@ -8,6 +8,11 @@
 import "./style.css";
 import * as Comlink from "comlink";
 import {
+  TrackFilter,
+  TrackRtsHistoryBuilder,
+  smoothTrackRts,
+} from "@neilberkman/sidereon";
+import {
   initEngine,
   parseTleFile,
   okFetch,
@@ -49,6 +54,16 @@ import {
   type LangId,
   type CapId,
 } from "./snippets";
+import { passTimingLabel } from "./pass-labels";
+import {
+  advanceTrackReplay,
+  createTrackReplayState,
+  markTrackReplaySmoothed,
+  restartTrackReplay,
+  setTrackReplayPlaying,
+  setTrackReplaySpeed,
+  type TrackReplayState,
+} from "./track-replay";
 
 const $ = (id: string) => document.getElementById(id)!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -57,7 +72,7 @@ function onIdle(fn: () => void, timeout = 1500): void {
     (window as unknown as { requestIdleCallback: (cb: () => void, opts?: { timeout: number }) => number })
       .requestIdleCallback(fn, { timeout });
   } else {
-    window.setTimeout(fn, Math.min(timeout, 900));
+    globalThis.setTimeout(fn, Math.min(timeout, 900));
   }
 }
 
@@ -143,6 +158,109 @@ let terminatorOn = false;
 const DEFAULT_MASK = 10;
 let maskDeg = DEFAULT_MASK;
 
+const CELESTRAK_GROUPS: { file: string; group: string; constellation: Constellation }[] = [
+  { file: "gps-ops", group: "gps-ops", constellation: "GPS" },
+  { file: "galileo", group: "galileo", constellation: "GAL" },
+  { file: "glo-ops", group: "glo-ops", constellation: "GLO" },
+  { file: "beidou", group: "beidou", constellation: "BDS" },
+];
+
+type TleLoadMode = "live" | "fallback";
+interface LoadedTleSource extends TleSource {
+  file: string;
+  group: string;
+  mode: TleLoadMode;
+  error?: string;
+}
+
+function celestrakGpUrl(group: string): string {
+  return `https://celestrak.org/NORAD/elements/gp.php?GROUP=${encodeURIComponent(group)}&FORMAT=tle`;
+}
+
+function validateTleText(text: string, label: string): string {
+  const count = text.split(/\r?\n/).filter((l) => l.startsWith("1 ")).length;
+  if (count < 3) throw new Error(`${label} returned ${count} element records`);
+  return text;
+}
+
+async function fetchLiveTle(file: string, group: string): Promise<string> {
+  const url = celestrakGpUrl(group);
+  const ctrl = new AbortController();
+  const timer = globalThis.setTimeout(() => ctrl.abort(), 4500);
+  try {
+    const r = await fetch(url, { cache: "default", headers: { Accept: "text/plain" }, signal: ctrl.signal });
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return validateTleText(await r.text(), file);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw new Error("live fetch timed out");
+    throw e;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
+async function fetchBundledTle(file: string): Promise<string> {
+  return validateTleText(await (await okFetch(`/data/${file}.tle`)).text(), file);
+}
+
+async function loadTleSource(entry: (typeof CELESTRAK_GROUPS)[number]): Promise<LoadedTleSource> {
+  try {
+    const text = await fetchLiveTle(entry.file, entry.group);
+    return { ...entry, text, mode: "live" };
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.warn(`[sidereon] CelesTrak ${entry.group} fetch failed, using bundled fallback`, e);
+    const text = await fetchBundledTle(entry.file);
+    return { ...entry, text, mode: "fallback", error };
+  }
+}
+
+function tleEpochFromLine1(line: string): Date | null {
+  const ep = line.slice(18, 32).trim();
+  if (!/^\d{5}/.test(ep)) return null;
+  const yy = Number(ep.slice(0, 2));
+  const year = yy < 57 ? 2000 + yy : 1900 + yy;
+  const doy = Number(ep.slice(2));
+  if (!Number.isFinite(doy)) return null;
+  return new Date(Date.UTC(year, 0, 1) + (doy - 1) * 86400000);
+}
+
+function firstTleEpoch(text: string): Date | null {
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith("1 ")) continue;
+    return tleEpochFromLine1(line);
+  }
+  return null;
+}
+
+function primaryTleEpoch(sources: LoadedTleSource[]): Date | null {
+  const gps = sources.find((s) => s.file === "gps-ops");
+  if (gps) {
+    const epoch = firstTleEpoch(gps.text);
+    if (epoch) return epoch;
+  }
+  for (const src of sources) {
+    const epoch = firstTleEpoch(src.text);
+    if (epoch) return epoch;
+  }
+  return null;
+}
+
+function updateTleFreshnessFoot(sources: LoadedTleSource[]): void {
+  const foot = $("legend-foot");
+  const epoch = primaryTleEpoch(sources);
+  if (!epoch) {
+    foot.textContent = "TLE · CELESTRAK · EPOCH UNKNOWN";
+    foot.classList.add("stale");
+    return;
+  }
+  const ageDays = Math.max(0, Math.floor((Date.now() - epoch.getTime()) / 86400000));
+  const modes = new Set(sources.map((s) => s.mode));
+  const mode = modes.size === 1 ? (modes.has("live") ? "LIVE" : "OFFLINE FALLBACK") : "MIXED SOURCE";
+  foot.textContent = `TLE · CELESTRAK · ${mode} · EPOCH ${epoch.toISOString().slice(0, 10)} · ${ageDays}d OLD`;
+  foot.classList.toggle("stale", ageDays >= 3);
+}
+
 // SOLVE-panel interactive state: which atmosphere corrections are engaged in the
 // real WASM solve. Defaults to BOTH so the panel opens on the corrected fix.
 type CorrKey = "none" | "iono" | "tropo" | "both";
@@ -208,18 +326,17 @@ async function boot() {
   await sleep(80);
 
   line('<span class="ok">›</span> fetching real element sets · celestrak');
-  const files: [string, Constellation][] = [
-    ["gps-ops", "GPS"],
-    ["galileo", "GAL"],
-    ["glo-ops", "GLO"],
-    ["beidou", "BDS"],
-  ];
-  for (const [f, c] of files) {
-    const txt = await (await okFetch(`/data/${f}.tle`)).text();
-    tleSources.push({ text: txt, constellation: c });
-    const parsed = parseTleFile(txt, c);
+  const loadedTles: LoadedTleSource[] = [];
+  for (const entry of CELESTRAK_GROUPS) {
+    const src = await loadTleSource(entry);
+    loadedTles.push(src);
+    tleSources.push({ text: src.text, constellation: src.constellation });
+    const parsed = parseTleFile(src.text, src.constellation);
     sats = sats.concat(parsed);
-    line(`  ${c.padEnd(3)} · <span class="em">${parsed.length}</span> satellites · SGP4 initialized`);
+    const note = src.mode === "live" ? "CelesTrak live/cache" : `bundled fallback · ${src.error ?? "offline"}`;
+    line(
+      `  ${src.constellation.padEnd(3)} · <span class="em">${parsed.length}</span> satellites · ${note}`,
+    );
     await sleep(55);
   }
   line(`  total tracked · <span class="ok">${sats.length}</span> objects`);
@@ -254,18 +371,8 @@ async function boot() {
   skyPanel = new Skyplot($("skyplot") as HTMLCanvasElement, maskDeg);
   updateSkyLoopState();
   buildLegend();
+  updateTleFreshnessFoot(loadedTles);
   buildLabControls(); // populate the conjunction + IOD satellite pickers
-  // Data freshness: TLEs are bundled at build time (npm prebuild -> fetch-data.mjs),
-  // so show their epoch + age rather than implying a perpetually-live feed.
-  try {
-    const m = await (await okFetch("/data/data-manifest.json")).json();
-    if (m.tleEpoch) {
-      const ageDays = Math.max(0, Math.floor((Date.now() - Date.parse(m.tleEpoch)) / 86400000));
-      $("legend-foot").textContent = `TLE · CELESTRAK · EPOCH ${m.tleEpoch.slice(0, 10)} · ${ageDays}d OLD`;
-    }
-  } catch {
-    /* manifest is optional; keep the default footer */
-  }
   await sleep(90);
 
   line('<span class="ok">›</span> staging IGS station ABMF RINEX obs + broadcast nav · hashing inputs');
@@ -276,6 +383,14 @@ async function boot() {
   );
   line(`  ${sppData.provenance.obsCount} pseudoranges armed · ${sppData.provenance.constellations}`);
   await sleep(90);
+
+  line('<span class="ok">›</span> staging GSDC Pixel4 phone track + SPAN truth · static JSON');
+  await loadTrackCleanupData();
+  line(
+    `  GSDC 2020-05-14-US-MTV-1 · <span class="em">${trackData?.samples.length ?? 0}</span> epochs · ` +
+      `<span class="em">${trackAssetBytes.toLocaleString()}</span> B · CC BY 4.0`,
+  );
+  await sleep(70);
 
   line("  IONEX · lazy on TEC toggle");
   await sleep(35);
@@ -527,10 +642,8 @@ function applyPasses(passes: ObservePass[]) {
   }
   $("pass-list").innerHTML = passes
     .map((p) => {
-      const t = new Date(p.aosISO);
-      const hh = String(t.getUTCHours()).padStart(2, "0");
-      const mm = String(t.getUTCMinutes()).padStart(2, "0");
-      return `<div class="pass-row"><span class="prn" style="color:${CONSTELLATION[p.constellation].css}">${p.prn}</span><span class="t">AOS ${hh}:${mm}Z</span><span class="el">${p.maxEl.toFixed(0)}°</span></div>`;
+      const timing = passTimingLabel(p);
+      return `<div class="pass-row"><span class="prn" style="color:${CONSTELLATION[p.constellation].css}">${p.prn}</span><span class="t">${timing}</span><span class="el">${p.maxEl.toFixed(0)}°</span></div>`;
     })
     .join("");
 }
@@ -811,6 +924,7 @@ function updateNetPill() {
     "coverage-net-pill",
     "conj-net-pill",
     "iod-net-pill",
+    "track-net-pill",
   ]) {
     const pill = document.getElementById(id);
     if (!pill) continue;
@@ -884,6 +998,354 @@ function startHeroSolveLoop() {
     }
   });
   start();
+}
+
+// ---- TRACK CLEANUP: real phone drive + WASM TrackFilter --------------------
+type Vec3 = [number, number, number];
+type CovLower = [number, number, number, number, number, number];
+interface TrackSample {
+  t: number;
+  r: Vec3; // raw local ENU metres
+  q: Vec3; // SPAN truth local ENU metres
+  c: CovLower; // solver covariance, local ENU lower triangle
+  u: number;
+  e: number;
+}
+interface TrackDataset {
+  schema: number;
+  meta: {
+    dataset: string;
+    drive: string;
+    phone: string;
+    license: string;
+    referenceRun?: {
+      rawRmsM: number;
+      rawMaxM: number;
+      filteredRmsM: number;
+      filteredMaxM: number;
+      smoothedRmsM: number;
+      smoothedMaxM: number;
+    };
+  };
+  origin: { frame: string; latDeg: number; lonDeg: number; heightM: number };
+  samples: TrackSample[];
+}
+
+let trackData: TrackDataset | null = null;
+let trackAssetBytes = 0;
+let trackState: TrackReplayState = createTrackReplayState(0);
+let trackFilter: TrackFilter | null = null;
+let trackHistory: TrackRtsHistoryBuilder | null = null;
+let trackFiltered: Vec3[] = [];
+let trackSmoothed: Vec3[] | null = null;
+let trackRaf = 0;
+let trackLastFrame = 0;
+let trackLastPaint = 0;
+let trackPanelVisible = false;
+
+// Static asset generated from GSDC 2020-05-14-US-MTV-1, Pixel4_GnssLog.20o,
+// and SPAN_Pixel4_10Hz.nmea. Dataset license: CC BY 4.0.
+async function loadTrackCleanupData(): Promise<void> {
+  const buf = await (await okFetch("/data/track-cleanup-gsdc-mtv.json")).arrayBuffer();
+  trackAssetBytes = buf.byteLength;
+  const text = new TextDecoder().decode(buf);
+  const data = JSON.parse(text) as TrackDataset;
+  if (data.schema !== 1 || !Array.isArray(data.samples) || data.samples.length < 2) {
+    throw new Error("invalid track cleanup asset");
+  }
+  trackData = data;
+  resetTrackRuntime(false);
+}
+
+function covFromLower(c: CovLower): number[][] {
+  return [
+    [c[0], c[1], c[2]],
+    [c[1], c[3], c[4]],
+    [c[2], c[4], c[5]],
+  ];
+}
+
+function copyVec3(values: number[]): Vec3 {
+  return [values[0], values[1], values[2]];
+}
+
+function resetTrackRuntime(playing: boolean): void {
+  if (!trackData) return;
+  trackFilter?.free?.();
+  trackHistory?.free?.();
+  const first = trackData.samples[0];
+  trackFilter = TrackFilter.fromPosition({
+    frame: "enu",
+    initialTS: first.t,
+    initialPositionM: first.r,
+    positionCovarianceM2: covFromLower(first.c),
+    initialVelocityVarianceM2S2: 1.0,
+    accelerationVarianceSpectralDensityM2S3: 0.2,
+  });
+  trackHistory = TrackRtsHistoryBuilder.fromFilter(trackFilter);
+  trackFiltered = [first.r];
+  trackSmoothed = null;
+  trackState = setTrackReplayPlaying(createTrackReplayState(trackData.samples.length, trackState.speed || 24), playing);
+  trackLastFrame = 0;
+  trackLastPaint = 0;
+  renderTrackPanel();
+}
+
+function ensureTrackFilteredThrough(cursor: number): void {
+  if (!trackData || !trackFilter || !trackHistory) return;
+  const n = Math.min(cursor, trackData.samples.length);
+  while (trackFiltered.length < n) {
+    const sample = trackData.samples[trackFiltered.length];
+    const dt = Math.max(0, sample.t - (trackFilter.state as { tS: number }).tS);
+    trackFilter.predictRecorded(dt, trackHistory);
+    const update = trackFilter.updatePositionRecorded(
+      { positionM: sample.r, covarianceM2: covFromLower(sample.c) },
+      trackHistory,
+    ) as { updated: { positionM: number[] } };
+    trackFiltered.push(copyVec3(update.updated.positionM));
+  }
+}
+
+function runTrackSmoother(): void {
+  if (!trackData || !trackHistory || trackSmoothed) return;
+  ensureTrackFilteredThrough(trackData.samples.length);
+  const history = trackHistory.finish();
+  const smoothed = smoothTrackRts(history);
+  trackSmoothed = (smoothed.epochs as { state: { positionM: number[] } }[]).map((epoch) =>
+    copyVec3(epoch.state.positionM),
+  );
+  trackState = markTrackReplaySmoothed(trackState);
+  history.free?.();
+  smoothed.free?.();
+  trackHistory.free?.();
+  trackHistory = null;
+  renderTrackPanel();
+}
+
+function trackError(points: Vec3[], count: number): { rmsM: number; maxM: number } | null {
+  if (!trackData || count <= 0) return null;
+  const n = Math.min(count, points.length, trackData.samples.length);
+  if (n <= 0) return null;
+  let sum = 0;
+  let max = 0;
+  for (let i = 0; i < n; i++) {
+    const truth = trackData.samples[i].q;
+    const p = points[i];
+    const err = Math.hypot(p[0] - truth[0], p[1] - truth[1], p[2] - truth[2]);
+    sum += err * err;
+    if (err > max) max = err;
+  }
+  return { rmsM: Math.sqrt(sum / n), maxM: max };
+}
+
+function fmtTrackMetric(v: number | undefined): string {
+  return v === undefined || !Number.isFinite(v) ? "·" : `${v.toFixed(2)} m`;
+}
+
+function trackBounds(): { minX: number; maxX: number; minY: number; maxY: number } | null {
+  if (!trackData) return null;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const s of trackData.samples) {
+    for (const p of [s.r, s.q]) {
+      minX = Math.min(minX, p[0]);
+      maxX = Math.max(maxX, p[0]);
+      minY = Math.min(minY, p[1]);
+      maxY = Math.max(maxY, p[1]);
+    }
+  }
+  if (!Number.isFinite(minX)) return null;
+  return { minX, maxX, minY, maxY };
+}
+
+function drawTrackLine(
+  ctx: CanvasRenderingContext2D,
+  points: Vec3[],
+  count: number,
+  project: (p: Vec3) => [number, number],
+  color: string,
+  width: number,
+  alpha: number,
+): void {
+  const n = Math.min(count, points.length);
+  if (n < 2) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  for (let i = 0; i < n; i++) {
+    const [x, y] = project(points[i]);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawTrackCanvas(): void {
+  if (!trackData) return;
+  const canvas = document.getElementById("track-canvas") as HTMLCanvasElement | null;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "rgba(5, 7, 13, 0.9)";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  const b = trackBounds();
+  if (!b) return;
+  const pad = 18;
+  const spanX = Math.max(1, b.maxX - b.minX);
+  const spanY = Math.max(1, b.maxY - b.minY);
+  const scale = Math.min((rect.width - pad * 2) / spanX, (rect.height - pad * 2) / spanY);
+  const x0 = (rect.width - spanX * scale) / 2;
+  const y0 = (rect.height - spanY * scale) / 2;
+  const project = (p: Vec3): [number, number] => [x0 + (p[0] - b.minX) * scale, rect.height - (y0 + (p[1] - b.minY) * scale)];
+
+  ctx.strokeStyle = "rgba(53, 224, 216, 0.07)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 6; i++) {
+    const x = pad + ((rect.width - pad * 2) * i) / 6;
+    const y = pad + ((rect.height - pad * 2) * i) / 6;
+    ctx.beginPath();
+    ctx.moveTo(x, pad);
+    ctx.lineTo(x, rect.height - pad);
+    ctx.moveTo(pad, y);
+    ctx.lineTo(rect.width - pad, y);
+    ctx.stroke();
+  }
+
+  const raw = trackData.samples.map((s) => s.r);
+  const truth = trackData.samples.map((s) => s.q);
+  const count = trackState.cursor;
+  drawTrackLine(ctx, truth, trackData.samples.length, project, "#5c7a80", 1, 0.32);
+  drawTrackLine(ctx, raw, count, project, "#cfe9ec", 1.1, 0.34);
+  drawTrackLine(ctx, trackFiltered, count, project, "#35e0d8", 1.8, 0.92);
+  if (trackSmoothed) drawTrackLine(ctx, trackSmoothed, trackSmoothed.length, project, "#ffb347", 2.0, 0.92);
+
+  const head = trackFiltered[Math.min(count - 1, trackFiltered.length - 1)];
+  if (head) {
+    const [x, y] = project(head);
+    ctx.fillStyle = "#35e0d8";
+    ctx.shadowColor = "#35e0d8";
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+function renderTrackStats(): void {
+  if (!trackData) return;
+  const raw = trackData.samples.map((s) => s.r);
+  const rawErr = trackError(raw, trackState.cursor);
+  const filteredErr = trackError(trackFiltered, trackState.cursor);
+  const smoothedErr = trackSmoothed ? trackError(trackSmoothed, trackSmoothed.length) : null;
+  const rows: [string, { rmsM: number; maxM: number } | null][] = [
+    ["RAW", rawErr],
+    ["FILTERED", filteredErr],
+    ["SMOOTHED", smoothedErr],
+  ];
+  $("track-errors").innerHTML =
+    `<div class="cmp-row cmp-head"><span class="k"></span><span class="v">RMS</span><span class="v amber">MAX</span></div>` +
+    rows
+      .map(
+        ([k, m]) =>
+          `<div class="cmp-row"><span class="k">${k}</span><span class="v">${fmtTrackMetric(m?.rmsM)}</span><span class="v">${fmtTrackMetric(m?.maxM)}</span></div>`,
+      )
+      .join("");
+
+  const idx = Math.max(0, Math.min(trackState.cursor - 1, trackData.samples.length - 1));
+  const sample = trackData.samples[idx];
+  $("track-progress").textContent =
+    `${trackState.cursor}/${trackData.samples.length} epochs · t+${sample.t.toFixed(0)}s · ` +
+    `${sample.u} sats · residual ${sample.e.toFixed(1)} m`;
+  $("track-status").textContent = trackSmoothed
+    ? "RTS SMOOTHER COMPLETE"
+    : trackState.complete
+      ? "RUNNING RTS SMOOTHER"
+      : trackState.playing
+        ? "REPLAYING"
+        : "PAUSED";
+}
+
+function renderTrackPanel(): void {
+  const play = document.getElementById("track-play") as HTMLButtonElement | null;
+  const speed = document.getElementById("track-speed") as HTMLInputElement | null;
+  const speedVal = document.getElementById("track-speed-val");
+  if (!trackData) {
+    const progress = document.getElementById("track-progress");
+    if (progress) progress.textContent = "loading track…";
+    return;
+  }
+  if (play) play.textContent = trackState.playing ? "PAUSE" : trackState.complete ? "REPLAY" : "PLAY";
+  if (speed) speed.value = String(trackState.speed);
+  if (speedVal) speedVal.textContent = `${trackState.speed}x`;
+  renderTrackStats();
+  drawTrackCanvas();
+  updateNetPill();
+}
+
+function startTrackLoop(): void {
+  if (trackRaf || !trackState.playing || !trackPanelVisible || document.hidden) return;
+  trackRaf = requestAnimationFrame(trackLoop);
+}
+
+function stopTrackLoop(): void {
+  if (!trackRaf) return;
+  cancelAnimationFrame(trackRaf);
+  trackRaf = 0;
+}
+
+function trackLoop(now: number): void {
+  trackRaf = 0;
+  if (!trackState.playing || !trackPanelVisible || document.hidden) return;
+  if (!trackLastFrame) {
+    trackLastFrame = now;
+    trackLastPaint = now;
+    trackRaf = requestAnimationFrame(trackLoop);
+    return;
+  }
+  if (now - trackLastPaint < 1000 / 30) {
+    trackRaf = requestAnimationFrame(trackLoop);
+    return;
+  }
+  const next = advanceTrackReplay(trackState, now - trackLastFrame);
+  trackLastFrame = now;
+  trackLastPaint = now;
+  trackState = next;
+  ensureTrackFilteredThrough(trackState.cursor);
+  renderTrackPanel();
+  if (trackState.complete && !trackSmoothed) runTrackSmoother();
+  startTrackLoop();
+}
+
+function toggleTrackReplay(): void {
+  if (!trackData) return;
+  if (trackState.complete && !trackState.playing) {
+    resetTrackRuntime(true);
+    startTrackLoop();
+    return;
+  }
+  trackState = setTrackReplayPlaying(trackState, !trackState.playing);
+  renderTrackPanel();
+  if (trackState.playing) startTrackLoop();
+  else stopTrackLoop();
 }
 
 // ---- IONEX TEC -------------------------------------------------------------
@@ -1376,7 +1838,8 @@ const CAP_CARDS: [string, string][] = [
 ];
 function buildCapabilities() {
   $("cap-grid").innerHTML = CAP_CARDS.map(
-    ([t, d]) => `<div class="cap-card"><h3>${t}</h3><p>${d}</p></div>`,
+    ([t, d]) =>
+      `<div class="cap-card"><h3>${t === "TRACK FILTERING" ? `<a href="#track-cleanup-panel">${t}</a>` : t}</h3><p>${d}</p></div>`,
   ).join("");
 }
 
@@ -1931,6 +2394,21 @@ function setupObservers() {
   );
   if (skyCanvas) skyIo.observe(skyCanvas);
 
+  const trackPanel = document.getElementById("track-cleanup-panel");
+  const trackIo = new IntersectionObserver(
+    (entries) => {
+      trackPanelVisible = entries.some((e) => e.isIntersecting);
+      if (trackPanelVisible) {
+        renderTrackPanel();
+        startTrackLoop();
+      } else {
+        stopTrackLoop();
+      }
+    },
+    { threshold: 0.01, rootMargin: "120px 0px" },
+  );
+  if (trackPanel) trackIo.observe(trackPanel);
+
   window.addEventListener("scroll", markGlobeFramingDirty, { passive: true });
   window.addEventListener("orientationchange", markGlobeFramingDirty, { passive: true });
   window.visualViewport?.addEventListener("resize", markGlobeFramingDirty, { passive: true });
@@ -1943,6 +2421,7 @@ function setupObservers() {
     () => {
       markGlobeFramingDirty();
       applyGlobeFraming();
+      renderTrackPanel();
     },
     { passive: true },
   );
@@ -2097,6 +2576,21 @@ function wire() {
     iodRecompute();
   });
   $("iod-sat").addEventListener("change", () => runIod());
+
+  $("track-play").addEventListener("click", () => toggleTrackReplay());
+  $("track-restart").addEventListener("click", () => {
+    stopTrackLoop();
+    resetTrackRuntime(false);
+  });
+  ($("track-speed") as HTMLInputElement).addEventListener("input", (e) => {
+    const speed = Number((e.target as HTMLInputElement).value) || 24;
+    trackState = setTrackReplaySpeed(trackState, speed);
+    renderTrackPanel();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopTrackLoop();
+    else startTrackLoop();
+  });
 
   buildHeroSwitcher();
   buildInterfaces();
