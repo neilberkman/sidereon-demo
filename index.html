@@ -240,6 +240,43 @@
               <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
             </section>
           </div>
+
+          <section class="panel live-panel track-panel" id="track-cleanup-panel">
+            <div class="panel-head">
+              <span class="dot amber"></span>TRACK CLEANUP · LIVE PHONE DRIVE
+              <span class="net-pill" id="track-net-pill">NET 0</span>
+            </div>
+            <div class="panel-body track-body">
+              <div class="track-stage">
+                <canvas id="track-canvas" class="track-canvas"></canvas>
+                <div class="track-legend" aria-label="Track layers">
+                  <span><i class="raw"></i>RAW</span>
+                  <span><i class="filtered"></i>FILTERED</span>
+                  <span><i class="smoothed"></i>SMOOTHED</span>
+                </div>
+              </div>
+              <div class="track-side">
+                <div class="subhead">REAL WASM TRACKFILTER · PER-EPOCH REPLAY</div>
+                <div class="track-explainer">Fixes arrive with covariances; wide-covariance fixes get almost no weight, so spikes cannot pull the track.</div>
+                <div class="track-controls">
+                  <button class="track-btn" id="track-play" type="button">PLAY</button>
+                  <button class="track-btn" id="track-restart" type="button">RESTART</button>
+                  <div class="ctl track-speed-ctl">
+                    <span class="ctl-label">REPLAY SPEED <b id="track-speed-val">24x</b></span>
+                    <input type="range" class="slider" id="track-speed" min="4" max="120" step="4" value="24" aria-label="Track replay speed" />
+                  </div>
+                </div>
+                <div class="track-readout">
+                  <div class="so-row"><span class="k">STATE</span><span class="v hi" id="track-status">PAUSED</span></div>
+                  <div class="so-row"><span class="k">PROGRESS</span><span class="v" id="track-progress">loading track…</span></div>
+                </div>
+                <div class="subhead">3D ERROR VS SPAN TRUTH</div>
+                <div class="compare track-errors" id="track-errors"></div>
+                <div class="track-foot">GSDC · 2020-05-14-US-MTV-1 · Pixel4 · SPAN truth · CC BY 4.0 attribution</div>
+              </div>
+            </div>
+            <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+          </section>
           <div class="globe-hint">Drag to orbit · + / − to zoom · click the globe to set an observer</div>
         </div>
       </section>

@@ -54,6 +54,8 @@ export interface ObservePass {
   prn: string;
   constellation: Constellation;
   aosISO: string;
+  losISO: string;
+  upNow: boolean;
   maxEl: number;
 }
 export interface ObserveResult {
@@ -519,17 +521,25 @@ const api = {
     const events: ObservePass[] = [];
     for (const p of found) {
       const aos = new Date(Number(p.aosUnixUs / 1000n));
-      if (aos.getTime() < from.getTime()) continue; // already in view
+      const los = new Date(Number(p.losUnixUs / 1000n));
+      const upNow = aos.getTime() <= from.getTime() && from.getTime() < los.getTime();
       const m = meta[p.satelliteIndex];
       if (!m) continue;
       events.push({
         prn: m.prn,
         constellation: m.constellation,
         aosISO: aos.toISOString(),
+        losISO: los.toISOString(),
+        upNow,
         maxEl: p.maxElevationDeg,
       });
     }
-    events.sort((a, b) => Date.parse(a.aosISO) - Date.parse(b.aosISO));
+    events.sort((a, b) => {
+      if (a.upNow !== b.upNow) return a.upNow ? -1 : 1;
+      const at = Date.parse(a.upNow ? a.losISO : a.aosISO);
+      const bt = Date.parse(b.upNow ? b.losISO : b.aosISO);
+      return at - bt;
+    });
     return events;
   },
 
