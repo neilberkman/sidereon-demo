@@ -1059,21 +1059,23 @@ function drawSolveScatterCanvas(canvas: HTMLCanvasElement, points: SolveScatterP
 // The legend rows carry the live numbers so the canvas never draws colliding
 // text: "RAW 27.06 m" reads better in a row than stacked over the dots.
 function updateSolveScatterKeys(points: SolveScatterPoint[]): void {
+  const keyForMarker: Record<string, SolveScatterPoint["key"]> = {
+    raw: "none",
+    iono: "iono",
+    tropo: "tropo",
+    both: "both",
+  };
   for (const keyBox of document.querySelectorAll<HTMLElement>(".solve-scatter-key")) {
     for (const span of keyBox.querySelectorAll<HTMLElement>("span")) {
       const marker = span.querySelector("i");
       if (!marker) continue;
-      const key = marker.className as SolveScatterPoint["key"];
-      const point = points.find((p) => p.key === key);
+      const pointKey = keyForMarker[marker.className];
+      const point = points.find((p) => p.key === pointKey);
       if (!point) continue;
-      const text = `${point.label} ${fmtLen(point.errorM)}`;
+      const text = ` ${marker.className.toUpperCase()} ${fmtLen(point.errorM)}`;
       if (span.dataset.keyText !== text) {
         span.dataset.keyText = text;
-        marker.insertAdjacentText("afterend", "");
-        span.childNodes.forEach((n) => {
-          if (n.nodeType === Node.TEXT_NODE) n.remove();
-        });
-        span.appendChild(document.createTextNode(text));
+        span.replaceChildren(marker, document.createTextNode(text));
       }
       span.classList.toggle("active", point.active);
     }
@@ -1233,6 +1235,7 @@ let trackFilter: TrackFilter | null = null;
 let trackHistory: TrackRtsHistoryBuilder | null = null;
 let trackFiltered: Vec3[] = [];
 let trackSpikeIndices: number[] = [];
+let trackSpikeRun: { maxIdx: number; maxDev: number; lastIdx: number } | null = null;
 let trackSmoothed: Vec3[] | null = null;
 let trackRaf = 0;
 let trackLastFrame = 0;
@@ -1287,6 +1290,7 @@ function resetTrackRuntime(playing: boolean): void {
   trackHistory = TrackRtsHistoryBuilder.fromFilter(trackFilter);
   trackFiltered = [first.r];
   trackSpikeIndices = [];
+  trackSpikeRun = null;
   trackSmoothed = null;
   trackState = setTrackReplayPlaying(createTrackReplayState(trackData.samples.length, trackState.speed || 24), playing);
   trackLastFrame = 0;
@@ -1306,8 +1310,24 @@ function ensureTrackFilteredThrough(cursor: number): void {
       trackHistory,
     ) as { updated: { positionM: number[] } };
     const filtered = copyVec3(update.updated.positionM);
-    if (Math.hypot(sample.r[0] - filtered[0], sample.r[1] - filtered[1]) > 8) {
-      trackSpikeIndices.push(trackFiltered.length);
+    const deviation = Math.hypot(sample.r[0] - filtered[0], sample.r[1] - filtered[1]);
+    const idx = trackFiltered.length;
+    // One mark per spike EVENT: a run of consecutive divergent epochs collapses
+    // to its worst point, so clusters read as single rejections, not noise.
+    if (deviation > 8) {
+      if (trackSpikeRun && idx - trackSpikeRun.lastIdx <= 4) {
+        trackSpikeRun.lastIdx = idx;
+        if (deviation > trackSpikeRun.maxDev) {
+          trackSpikeRun.maxDev = deviation;
+          trackSpikeRun.maxIdx = idx;
+        }
+      } else {
+        if (trackSpikeRun) trackSpikeIndices.push(trackSpikeRun.maxIdx);
+        trackSpikeRun = { maxIdx: idx, maxDev: deviation, lastIdx: idx };
+      }
+    } else if (trackSpikeRun && idx - trackSpikeRun.lastIdx > 4) {
+      trackSpikeIndices.push(trackSpikeRun.maxIdx);
+      trackSpikeRun = null;
     }
     trackFiltered.push(filtered);
   }

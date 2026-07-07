@@ -1203,7 +1203,7 @@ main {
 }
 .solve-scatter-canvas {
   width: 100%;
-  aspect-ratio: 2.4 / 1;
+  aspect-ratio: 1.6 / 1;
   display: block;
 }
 .solve-scatter-key {
