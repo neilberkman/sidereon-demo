@@ -1769,8 +1769,8 @@ main {
   display: inline-block;
 }
 .track-legend .raw {
-  background: #cfe9ec;
-  opacity: 0.45;
+  background: #ff5d73;
+  opacity: 0.7;
 }
 .track-legend .filtered {
   background: var(--cyan);

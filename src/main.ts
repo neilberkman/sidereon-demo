@@ -104,10 +104,18 @@ function onIdle(fn: () => void, timeout = 1500): void {
 let netTotal = 0;
 let netBaseline = 0;
 let bootDone = false;
+const postBootFetches: string[] = [];
 const realFetch = window.fetch.bind(window);
 window.fetch = ((...args: Parameters<typeof fetch>) => {
   netTotal++;
-  if (bootDone) updateNetPill();
+  if (bootDone) {
+    const target = args[0];
+    postBootFetches.push(
+      typeof target === "string" ? target : target instanceof URL ? target.href : target.url,
+    );
+    console.warn("[sidereon] post-load fetch:", postBootFetches[postBootFetches.length - 1]);
+    updateNetPill();
+  }
   return realFetch(...args);
 }) as typeof fetch;
 const netCallsSinceLoad = () => netTotal - netBaseline;
@@ -1224,6 +1232,7 @@ let trackState: TrackReplayState = createTrackReplayState(0);
 let trackFilter: TrackFilter | null = null;
 let trackHistory: TrackRtsHistoryBuilder | null = null;
 let trackFiltered: Vec3[] = [];
+let trackSpikeIndices: number[] = [];
 let trackSmoothed: Vec3[] | null = null;
 let trackRaf = 0;
 let trackLastFrame = 0;
@@ -1277,6 +1286,7 @@ function resetTrackRuntime(playing: boolean): void {
   });
   trackHistory = TrackRtsHistoryBuilder.fromFilter(trackFilter);
   trackFiltered = [first.r];
+  trackSpikeIndices = [];
   trackSmoothed = null;
   trackState = setTrackReplayPlaying(createTrackReplayState(trackData.samples.length, trackState.speed || 24), playing);
   trackLastFrame = 0;
@@ -1295,7 +1305,11 @@ function ensureTrackFilteredThrough(cursor: number): void {
       { positionM: sample.r, covarianceM2: covFromLower(sample.c) },
       trackHistory,
     ) as { updated: { positionM: number[] } };
-    trackFiltered.push(copyVec3(update.updated.positionM));
+    const filtered = copyVec3(update.updated.positionM);
+    if (Math.hypot(sample.r[0] - filtered[0], sample.r[1] - filtered[1]) > 8) {
+      trackSpikeIndices.push(trackFiltered.length);
+    }
+    trackFiltered.push(filtered);
   }
 }
 
@@ -1426,9 +1440,36 @@ function drawTrackCanvas(): void {
   const truth = trackData.samples.map((s) => s.q);
   const count = trackState.cursor;
   drawTrackLine(ctx, truth, trackData.samples.length, project, "#5c7a80", 1, 0.32);
-  drawTrackLine(ctx, raw, count, project, "#cfe9ec", 1.1, 0.34);
+  drawTrackLine(ctx, raw, count, project, "#ff5d73", 1.2, 0.6);
   drawTrackLine(ctx, trackFiltered, count, project, "#35e0d8", 1.8, 0.92);
   if (trackSmoothed) drawTrackLine(ctx, trackSmoothed, trackSmoothed.length, project, "#ffb347", 2.0, 0.92);
+
+  // Spike markers: where the raw fix diverged hard from the filtered track,
+  // leave a fading rose cross so the rejections stay visible after the head
+  // moves on. This is the panel's whole argument made watchable.
+  for (const idx of trackSpikeIndices) {
+    if (idx >= count) break;
+    const age = count - idx;
+    const alpha = Math.max(0.12, 1 - age / 600) * 0.9;
+    const [sx, sy] = project(raw[idx]);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = "#ff5d73";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(sx - 4, sy - 4);
+    ctx.lineTo(sx + 4, sy + 4);
+    ctx.moveTo(sx - 4, sy + 4);
+    ctx.lineTo(sx + 4, sy - 4);
+    ctx.stroke();
+    if (age < 40) {
+      ctx.globalAlpha = (1 - age / 40) * 0.5;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4 + age * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   const head = trackFiltered[Math.min(count - 1, trackFiltered.length - 1)];
   if (head) {
