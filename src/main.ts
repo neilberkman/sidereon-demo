@@ -188,16 +188,12 @@ const CELESTRAK_GROUPS: { file: string; group: string; constellation: Constellat
   { file: "beidou", group: "beidou", constellation: "BDS" },
 ];
 
-type TleLoadMode = "live" | "fallback";
+type TleLoadMode = "daily";
 interface LoadedTleSource extends TleSource {
   file: string;
   group: string;
   mode: TleLoadMode;
   error?: string;
-}
-
-function celestrakGpUrl(group: string): string {
-  return `https://celestrak.org/NORAD/elements/gp.php?GROUP=${encodeURIComponent(group)}&FORMAT=tle`;
 }
 
 function validateTleText(text: string, label: string): string {
@@ -206,36 +202,18 @@ function validateTleText(text: string, label: string): string {
   return text;
 }
 
-async function fetchLiveTle(file: string, group: string): Promise<string> {
-  const url = celestrakGpUrl(group);
-  const ctrl = new AbortController();
-  const timer = globalThis.setTimeout(() => ctrl.abort(), 4500);
-  try {
-    const r = await fetch(url, { cache: "default", headers: { Accept: "text/plain" }, signal: ctrl.signal });
-    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-    return validateTleText(await r.text(), file);
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") throw new Error("live fetch timed out");
-    throw e;
-  } finally {
-    globalThis.clearTimeout(timer);
-  }
-}
-
 async function fetchBundledTle(file: string): Promise<string> {
   return validateTleText(await (await okFetch(`/data/${file}.tle`)).text(), file);
 }
 
 async function loadTleSource(entry: (typeof CELESTRAK_GROUPS)[number]): Promise<LoadedTleSource> {
-  try {
-    const text = await fetchLiveTle(entry.file, entry.group);
-    return { ...entry, text, mode: "live" };
-  } catch (e) {
-    const error = e instanceof Error ? e.message : String(e);
-    console.warn(`[sidereon] CelesTrak ${entry.group} fetch failed, using bundled fallback`, e);
-    const text = await fetchBundledTle(entry.file);
-    return { ...entry, text, mode: "fallback", error };
-  }
+  // Element sets ship with the site and a scheduled job refreshes them from
+  // CelesTrak once a day, so visitors read CDN data at most a day old and
+  // CelesTrak sees one fetch per day instead of one per page load (their
+  // usage guidance; per-visitor gp.php traffic gets an IP throttled). The
+  // epoch-age readout below stays honest about the data's actual age.
+  const text = await fetchBundledTle(entry.file);
+  return { ...entry, text, mode: "daily" };
 }
 
 function tleEpochFromLine1(line: string): Date | null {
@@ -278,9 +256,7 @@ function updateTleFreshnessFoot(sources: LoadedTleSource[]): void {
     return;
   }
   const ageDays = Math.max(0, Math.floor((Date.now() - epoch.getTime()) / 86400000));
-  const modes = new Set(sources.map((s) => s.mode));
-  const mode = modes.size === 1 ? (modes.has("live") ? "LIVE" : "OFFLINE FALLBACK") : "MIXED SOURCE";
-  foot.textContent = `TLE · CELESTRAK · ${mode} · EPOCH ${epoch.toISOString().slice(0, 10)} · ${ageDays}d OLD`;
+  foot.textContent = `TLE · CELESTRAK · DAILY REFRESH · EPOCH ${epoch.toISOString().slice(0, 10)} · ${ageDays}d OLD`;
   foot.classList.toggle("stale", ageDays >= 3);
 }
 
@@ -360,7 +336,7 @@ async function boot() {
     tleSources.push({ text: src.text, constellation: src.constellation });
     const parsed = parseTleFile(src.text, src.constellation);
     sats = sats.concat(parsed);
-    const note = src.mode === "live" ? "CelesTrak live/cache" : `bundled fallback · ${src.error ?? "offline"}`;
+    const note = "celestrak · daily refresh";
     line(
       `  ${src.constellation.padEnd(3)} · <span class="em">${parsed.length}</span> satellites · ${note}`,
     );

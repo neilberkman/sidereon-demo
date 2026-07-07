@@ -1,0 +1,56 @@
+name: refresh-tle
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch element sets from CelesTrak (one polite pass per day)
+        run: |
+          set -euo pipefail
+          declare -A groups=( [gps-ops]=gps-ops [galileo]=galileo [glo-ops]=glo-ops [beidou]=beidou )
+          for file in "${!groups[@]}"; do
+            group="${groups[$file]}"
+            out="public/data/${file}.tle"
+            curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 20 --fail --silent --show-error \
+              --max-time 60 -A "sidereon.dev daily refresh (github action)" \
+              "https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle" -o "${out}.new"
+            # sanity: at least 3 records (3 lines each), first line looks like a TLE name/line
+            lines=$(wc -l < "${out}.new")
+            if [ "$lines" -lt 9 ]; then echo "${file}: too few lines ($lines), keeping previous"; rm "${out}.new"; continue; fi
+            mv "${out}.new" "${out}"
+            sleep 15
+          done
+      - name: Commit if changed
+        run: |
+          git config user.name "tle-refresh"
+          git config user.email "actions@users.noreply.github.com"
+          git add public/data/*.tle
+          git diff --cached --quiet && { echo "no changes"; exit 0; }
+          git commit -m "data: daily element-set refresh"
+          git push
+      - name: Upload data files to the CDN and purge
+        env:
+          BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request,glob
+          k=os.environ["BUNNY_API_KEY"]
+          sz=json.load(urllib.request.urlopen(urllib.request.Request("https://api.bunny.net/storagezone/1616378",headers={"AccessKey":k,"Accept":"application/json"})))
+          pw=sz["Password"]; name=sz["Name"]
+          for f in glob.glob("public/data/*.tle"):
+              rel="data/"+os.path.basename(f); data=open(f,"rb").read()
+              urllib.request.urlopen(urllib.request.Request(f"https://ny.storage.bunnycdn.com/{name}/{rel}",data=data,method="PUT",headers={"AccessKey":pw,"Content-Type":"application/octet-stream"}),timeout=120)
+              got=urllib.request.urlopen(urllib.request.Request(f"https://ny.storage.bunnycdn.com/{name}/{rel}",headers={"AccessKey":pw}),timeout=120).read()
+              assert len(got)==len(data), rel
+              print("uploaded",rel,len(data))
+          urllib.request.urlopen(urllib.request.Request("https://api.bunny.net/pullzone/6071487/purgeCache",method="POST",headers={"AccessKey":k,"Content-Length":"0"}))
+          print("purge OK")
+          PY

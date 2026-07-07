@@ -1,0 +1,217 @@
+{
+  "schema": 1,
+  "updated": "2026-07-07",
+  "purpose": "Seed ledger for RTKLIBExplorer-style Sidereon comparisons. Static RTK/CORS is publishable now; PPP/SSR remains gated until validation.",
+  "sourceThreads": [
+    {
+      "id": "rtklibexplorer-ppp-ssr-revisited-2026",
+      "url": "https://rtklibexplorer.wordpress.com/2026/06/14/using-ssr-corrections-with-rtklib-for-ppp-solutions-revisited/",
+      "facts": [
+        "SSRA00CNE0 SSR correction stream",
+        "u-blox F9P L1/L2",
+        "Quectel LG290P L1/L2 and L1/L3",
+        "15-30 minute decimeter-accuracy target",
+        "RTKPOST RTCM3 SSR replay noted in comments",
+        "PPP-RTK and long-baseline RTK called out as follow-up interests"
+      ]
+    }
+  ],
+  "gates": {
+    "publishPppSsrPerformanceClaim": {
+      "status": "closed",
+      "reason": "Sidereon PPP/SSR/HAS replay still needs validation against CSRS, OPUS, Ginan, and public station truth before public performance claims.",
+      "requiredEvidence": [
+        "same receiver observation logs or documented public equivalents",
+        "same SSR/HAS correction stream or archived equivalent",
+        "truth source with uncertainty",
+        "configuration files",
+        "non-convergence and rejected-satellite accounting"
+      ]
+    }
+  },
+  "experiments": [
+    {
+      "id": "wtzr-wtzz-static-rtk-120epoch",
+      "title": "WTZR/WTZZ static RTK against nearby CORS",
+      "status": "ready_for_public_ledger",
+      "claimLevel": "method_comparison",
+      "publicClaim": true,
+      "validation": {
+        "status": "partial",
+        "truth": "published ITRF marker coordinates plus RINEX antenna heights",
+        "notes": [
+          "RTKLIB oracle fixtures are committed in sidereon-core",
+          "Sidereon notebook results are rendered under public/static-occupation",
+          "A dedicated 120-epoch JSON export is still needed for direct site rendering"
+        ]
+      },
+      "data": {
+        "baseStation": "WTZR",
+        "roverStation": "WTZZ",
+        "date": "2020-06-25",
+        "epochs": 120,
+        "sp3Product": "GBM0MGXRAP_20201770000_01D_05M_ORB_120epoch.sp3",
+        "observationFiles": [
+          "WTZR00DEU_R_20201770000_01D_30S_MO_120epoch.rnx",
+          "WTZZ00DEU_R_20201770000_01D_30S_MO_120epoch.rnx"
+        ]
+      },
+      "surfaces": {
+        "notebook": "/Users/neil/xuku/sidereon-python/examples/static_occupation_vs_cors.ipynb",
+        "renderedNotebook": "/static-occupation/",
+        "browserQuickReplay": "live RTK panel, 40 obs epochs and 6 SP3 epochs"
+      },
+      "sidereon": {
+        "metrics": [
+          {
+            "method": "Single-frequency static RTK float",
+            "status": "float",
+            "horizontalErrorCm": 0.721,
+            "verticalErrorCm": -0.377,
+            "horizontalBoundCm": 8.414,
+            "verticalBoundCm": 3.916,
+            "boundChunksUsed": 4
+          },
+          {
+            "method": "Dual-frequency wide-lane fixed RTK",
+            "status": "fixed",
+            "horizontalErrorCm": 0.749,
+            "verticalErrorCm": -0.393,
+            "horizontalBoundCm": 0.995,
+            "verticalBoundCm": 1.175,
+            "boundChunksUsed": 3
+          }
+        ]
+      },
+      "rtklib": {
+        "oracles": [
+          {
+            "fixture": "wtzr_wtzz_rtklib_oracle.json",
+            "label": "l1_brdc_fix_and_hold",
+            "epochs": 120,
+            "fixedEpochs": 119,
+            "finalStatus": "fixed",
+            "finalRatio": 999.9,
+            "finalTruthErrorM": 0.003209832459
+          },
+          {
+            "fixture": "wtzr_wtzz_rtklib_precise_oracle.json",
+            "label": "l1_precise_cod_sp3_grg_clk_fix_and_hold",
+            "epochs": 120,
+            "fixedEpochs": 119,
+            "finalStatus": "fixed",
+            "finalRatio": 999.9,
+            "finalTruthErrorM": 0.003209832459
+          },
+          {
+            "fixture": "wtzr_wtzz_multignss_static_rtklib_oracle.json",
+            "label": "static_multignss_grec_l1_fix_and_hold",
+            "epochs": 120,
+            "fixedEpochs": 120,
+            "finalStatus": "fixed",
+            "finalRatio": 999.9,
+            "finalTruthErrorM": 0.001834629036,
+            "meanTruthErrorM": 0.002310674122,
+            "maxTruthErrorM": 0.005706348211
+          }
+        ]
+      }
+    },
+    {
+      "id": "wtzr-wtzz-browser-quick-replay",
+      "title": "WTZR/WTZZ in-browser RTK quick replay",
+      "status": "available_in_demo",
+      "claimLevel": "browser_execution_demo",
+      "publicClaim": true,
+      "validation": {
+        "status": "demo_only",
+        "truth": "same WTZR/WTZZ published coordinates, trimmed data",
+        "notes": [
+          "Not the same arc length as the 120-epoch RTKLIB oracle",
+          "Intended to prove in-browser execution and UX"
+        ]
+      },
+      "data": {
+        "epochs": 40,
+        "sp3Epochs": 6,
+        "assets": [
+          "/data/rtk/WTZR00DEU_R_20201770000_01D_30S_MO_40epoch.rnx",
+          "/data/rtk/WTZZ00DEU_R_20201770000_01D_30S_MO_40epoch.rnx",
+          "/data/rtk/GBM0MGXRAP_20201770000_01D_05M_ORB_6epoch.sp3"
+        ]
+      }
+    },
+    {
+      "id": "gsdc-phone-track-cleanup",
+      "title": "GSDC phone track cleanup",
+      "status": "available_in_demo",
+      "claimLevel": "workflow_comparison",
+      "publicClaim": true,
+      "validation": {
+        "status": "partial",
+        "truth": "Google Smartphone Decimeter Challenge public truth",
+        "notes": [
+          "RTKLIB/demo5 oracle rows should be added from committed core fixtures"
+        ]
+      },
+      "data": {
+        "dataset": "Google Smartphone Decimeter Challenge",
+        "drive": "2020-05-14-US-MTV-1",
+        "phone": "Pixel4"
+      },
+      "sidereon": {
+        "metrics": [
+          {
+            "method": "raw SPP",
+            "rmsM": 9.1016,
+            "maxM": 61.3414
+          },
+          {
+            "method": "covariance-weighted filter",
+            "rmsM": 7.2934,
+            "maxM": 31.846
+          },
+          {
+            "method": "fixed-interval smoother",
+            "rmsM": 5.8606,
+            "maxM": 16.1746
+          }
+        ]
+      }
+    },
+    {
+      "id": "ppp-ssr-revisited-rtklibexplorer-2026",
+      "title": "SSR PPP revisit against RTKLIBExplorer experiment",
+      "status": "blocked_on_validation_and_source_data",
+      "claimLevel": "experiment_request",
+      "publicClaim": false,
+      "validation": {
+        "status": "pending",
+        "truth": "CSRS, OPUS, Ginan, and published station coordinates",
+        "notes": [
+          "Needs observation logs and SSR/HAS replay source",
+          "Needs accepted Sidereon PPP/SSR correction replay path",
+          "Do not publish convergence or accuracy claims yet"
+        ]
+      },
+      "targetMatrix": [
+        "F9P L1/L2",
+        "LG290P L1/L2",
+        "LG290P L1/L3",
+        "SSRA00CNE0 SSR",
+        "Galileo HAS when receiver/source data are available"
+      ],
+      "targetMetrics": [
+        "ENU convergence curve",
+        "time to under 20 cm",
+        "time to under 10 cm",
+        "error after 15 minutes",
+        "error after 30 minutes",
+        "error after 60 minutes",
+        "satellites used and rejected",
+        "correction age and missing-message accounting",
+        "runtime and replay speed"
+      ]
+    }
+  ]
+}
