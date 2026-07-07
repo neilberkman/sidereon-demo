@@ -183,6 +183,15 @@
                 <div class="trace" id="solve-trace">
                   <span class="tr-node">RINEX OBS + BROADCAST NAV</span><span class="tr-arrow">→</span><span class="tr-node engine">solveBroadcast() · Rust→WASM</span><span class="tr-arrow">→</span><span class="tr-node">ECEF → LLH</span>
                 </div>
+                <div class="solve-visual">
+                  <canvas id="solve-scatter" class="solve-scatter-canvas" aria-label="ENU solve scatter"></canvas>
+                  <div class="solve-scatter-key" aria-label="Solve scatter legend">
+                    <span><i class="raw"></i>RAW</span>
+                    <span><i class="iono"></i>IONO</span>
+                    <span><i class="tropo"></i>TROPO</span>
+                    <span><i class="both"></i>BOTH</span>
+                  </div>
+                </div>
                 <div class="subhead">CONFIGURE THE SOLVE · each change re-runs the real WASM fix</div>
                 <div class="solve-controls">
                   <div class="ctl">
@@ -273,6 +282,41 @@
                 <div class="subhead">3D ERROR VS SPAN TRUTH</div>
                 <div class="compare track-errors" id="track-errors"></div>
                 <div class="track-foot">GSDC · 2020-05-14-US-MTV-1 · Pixel4 · SPAN truth · CC BY 4.0 attribution</div>
+              </div>
+            </div>
+            <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>
+          </section>
+
+          <section class="panel live-panel rtk-panel" id="rtk-panel">
+            <div class="panel-head">
+              <span class="dot amber"></span>RTK - MILLIMETER BASELINE, CLIENT-SIDE
+              <span class="net-pill" id="rtk-net-pill">NET 0</span>
+            </div>
+            <div class="panel-body rtk-body">
+              <div class="rtk-stage">
+                <canvas id="rtk-canvas" class="rtk-canvas"></canvas>
+                <div class="rtk-legend" aria-label="RTK plot layers">
+                  <span><i class="float"></i>FLOAT ARC</span>
+                  <span><i class="fixed"></i>FIXED</span>
+                  <span><i class="truth"></i>TRUTH</span>
+                </div>
+              </div>
+              <div class="rtk-side">
+                <div class="subhead">WTZR / WTZZ · 40 EPOCH RINEX + SP3</div>
+                <div class="rtk-explainer">Parsed, differenced, floated, then wide-lane fixed by the WASM engine in this tab.</div>
+                <div class="rtk-controls">
+                  <button class="track-btn" id="rtk-run" type="button">RUN RTK</button>
+                  <span class="rtk-status-badge" id="rtk-status">IDLE</span>
+                </div>
+                <div class="rtk-readout">
+                  <div class="so-row"><span class="k">BASELINE</span><span class="v hi" id="rtk-baseline">waiting</span></div>
+                  <div class="so-row"><span class="k">ERROR VS ITRF TRUTH</span><span class="v" id="rtk-error">waiting</span></div>
+                  <div class="so-row"><span class="k">RATIO</span><span class="v" id="rtk-ratio">waiting</span></div>
+                  <div class="so-row"><span class="k">WALL CLOCK</span><span class="v" id="rtk-wall">waiting</span></div>
+                </div>
+                <div class="subhead">FLOAT TO WIDE-LANE FIXED</div>
+                <div class="compare rtk-errors" id="rtk-errors"></div>
+                <div class="rtk-foot" id="rtk-foot">IGS MGEX / EPN WTZR-WTZZ 2020-06-25 trims · GFZ SP3 · public IGS data attribution</div>
               </div>
             </div>
             <i class="tick tl"></i><i class="tick tr"></i><i class="tick bl"></i><i class="tick br"></i>

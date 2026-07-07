@@ -24,6 +24,8 @@ import {
   slantDelayM,
   subSolarLL,
   recoverOrbit,
+  loadRtkAssets,
+  solveRtkDemo,
   type Sat,
   type SppData,
   type DualSolve,
@@ -32,6 +34,8 @@ import {
   type VisibleSat,
   type OrbitRecovery,
   type OrbitElements,
+  type RtkAssetBundle,
+  type RtkDemoResult,
 } from "./engine";
 import type {
   ObserveWorkerApi,
@@ -64,6 +68,24 @@ import {
   setTrackReplaySpeed,
   type TrackReplayState,
 } from "./track-replay";
+import {
+  beginSolveScatterTransition,
+  buildSolveScatterPoints,
+  interpolateSolveScatterTransition,
+  type SolveScatterKey,
+  type SolveScatterPoint,
+  type SolveScatterTransition,
+} from "./solve-scatter";
+import {
+  advanceRtkPanelPhase,
+  beginRtkPanelRun,
+  buildRtkConvergencePoints,
+  completeRtkPanelRun,
+  createRtkPanelState,
+  failRtkPanelRun,
+  type RtkConvergencePoint,
+  type RtkPanelState,
+} from "./rtk-panel";
 
 const $ = (id: string) => document.getElementById(id)!;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -142,6 +164,7 @@ let sats: Sat[] = [];
 const tleSources: TleSource[] = [];
 let globe: Globe;
 let sppData: SppData | null = null;
+let rtkAssets: RtkAssetBundle | null = null;
 let tecField: TecField | null = null;
 let tecWarmup: Promise<TecField> | null = null;
 let observer: { lat: number; lon: number } | null = null;
@@ -265,6 +288,10 @@ function updateTleFreshnessFoot(sources: LoadedTleSource[]): void {
 // real WASM solve. Defaults to BOTH so the panel opens on the corrected fix.
 type CorrKey = "none" | "iono" | "tropo" | "both";
 let solveCorrKey: CorrKey = "both";
+let solveScatterPoints: SolveScatterPoint[] = [];
+let solveScatterTransition: SolveScatterTransition | null = null;
+let solveScatterRaf = 0;
+let lastSolveConfigResults: Record<CorrKey, SppResult> | null = null;
 function corrFor(k: CorrKey): { ionosphere: boolean; troposphere: boolean } {
   return {
     ionosphere: k === "iono" || k === "both",
@@ -390,6 +417,15 @@ async function boot() {
     `  GSDC 2020-05-14-US-MTV-1 · <span class="em">${trackData?.samples.length ?? 0}</span> epochs · ` +
       `<span class="em">${trackAssetBytes.toLocaleString()}</span> B · CC BY 4.0`,
   );
+  await sleep(70);
+
+  line('<span class="ok">›</span> staging WTZR/WTZZ RTK RINEX + SP3 trims · static assets');
+  rtkAssets = await loadRtkAssets();
+  line(
+    `  RTK · <span class="em">${rtkAssets.provenance.totalBytes.toLocaleString()}</span> B · ` +
+      `40 obs epochs · SP3 sha256 <span class="em">${rtkAssets.provenance.sp3Sha256.slice(0, 12)}</span>`,
+  );
+  renderRtkPanel();
   await sleep(70);
 
   line("  IONEX · lazy on TEC toggle");
@@ -809,7 +845,13 @@ function runSolve() {
   requestAnimationFrame(() => {
     try {
       const baseline = solveSpp(sppData!, { ionosphere: false, troposphere: false }, 0);
-      const active = solveSpp(sppData!, corrFor(solveCorrKey), maskDeg);
+      const configResults: Record<CorrKey, SppResult> = {
+        none: solveSpp(sppData!, corrFor("none"), maskDeg),
+        iono: solveSpp(sppData!, corrFor("iono"), maskDeg),
+        tropo: solveSpp(sppData!, corrFor("tropo"), maskDeg),
+        both: solveSpp(sppData!, corrFor("both"), maskDeg),
+      };
+      const active = configResults[solveCorrKey];
       const dx = active.positionM[0] - baseline.positionM[0];
       const dy = active.positionM[1] - baseline.positionM[1];
       const dz = active.positionM[2] - baseline.positionM[2];
@@ -820,6 +862,7 @@ function runSolve() {
         deltaHeightM: active.geodetic.heightM - baseline.geodetic.heightM,
       };
       lastDual = dual;
+      lastSolveConfigResults = configResults;
       renderSolve(dual);
       // Refresh only the overlay's results (not its relocated controls), so a
       // re-solve triggered by dragging the overlay's mask slider never rebuilds
@@ -882,8 +925,140 @@ function renderSolve(dual: DualSolve) {
 
   $("compare-note").innerHTML = solveNote(dual);
 
+  updateSolveScatter();
   updateHeroReadout(dual.corrected);
   updateNetPill();
+}
+
+function configLabel(key: CorrKey): string {
+  if (key === "none") return "RAW";
+  if (key === "iono") return "+IONO";
+  if (key === "tropo") return "+TROPO";
+  return "+IONO+TROPO";
+}
+
+function tuple3(values: ArrayLike<number>): [number, number, number] {
+  return [values[0], values[1], values[2]];
+}
+
+function solveScatterColor(key: SolveScatterKey): string {
+  if (key === "none") return "#ff6b6b";
+  if (key === "iono") return "#c8f7ff";
+  if (key === "tropo") return "#ffb347";
+  return "#35e0d8";
+}
+
+function updateSolveScatter(): void {
+  if (!sppData || !lastSolveConfigResults) return;
+  const keys: CorrKey[] = ["none", "iono", "tropo", "both"];
+  const targets = buildSolveScatterPoints(
+    keys.map((key) => ({
+      key,
+      label: configLabel(key),
+      positionM: tuple3(lastSolveConfigResults![key].positionM),
+    })),
+    solveCorrKey,
+    sppData.provenance.truthEcefM,
+    sppData.provenance.stationLatDeg,
+    sppData.provenance.stationLonDeg,
+  );
+  solveScatterTransition = beginSolveScatterTransition(
+    solveScatterPoints,
+    targets,
+    performance.now(),
+  );
+  drawSolveScatterFrame();
+}
+
+function drawSolveScatterFrame(): void {
+  if (solveScatterRaf) cancelAnimationFrame(solveScatterRaf);
+  const tick = () => {
+    if (!solveScatterTransition) return;
+    const now = performance.now();
+    solveScatterPoints = interpolateSolveScatterTransition(solveScatterTransition, now);
+    const canvas = document.getElementById("solve-scatter") as HTMLCanvasElement | null;
+    if (canvas) drawSolveScatterCanvas(canvas, solveScatterPoints);
+    const ovCanvas = document.getElementById("ov-solve-scatter") as HTMLCanvasElement | null;
+    if (ovCanvas) drawSolveScatterCanvas(ovCanvas, solveScatterPoints);
+    if (now - solveScatterTransition.startedAtMs < solveScatterTransition.durationMs) {
+      solveScatterRaf = requestAnimationFrame(tick);
+    } else {
+      solveScatterRaf = 0;
+    }
+  };
+  solveScatterRaf = requestAnimationFrame(tick);
+}
+
+function drawSolveScatterCanvas(canvas: HTMLCanvasElement, points: SolveScatterPoint[]): void {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "rgba(5, 7, 13, 0.92)";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  const cx = rect.width * 0.5;
+  const cy = rect.height * 0.5;
+  const pad = 28;
+  const maxHorizontal = Math.max(
+    4,
+    ...points.map((point) => Math.hypot(point.eastM, point.northM)),
+  );
+  const scale = (Math.min(rect.width, rect.height) * 0.5 - pad) / maxHorizontal;
+
+  ctx.strokeStyle = "rgba(53, 224, 216, 0.08)";
+  ctx.lineWidth = 1;
+  for (let ring = 1; ring <= 3; ring++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (ring / 3) * maxHorizontal * scale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(53, 224, 216, 0.36)";
+  ctx.beginPath();
+  ctx.moveTo(cx - 11, cy);
+  ctx.lineTo(cx + 11, cy);
+  ctx.moveTo(cx, cy - 11);
+  ctx.lineTo(cx, cy + 11);
+  ctx.stroke();
+
+  ctx.font = "10px IBM Plex Mono, monospace";
+  ctx.fillStyle = "rgba(207, 233, 236, 0.72)";
+  ctx.fillText("TRUTH", cx + 14, cy - 9);
+  ctx.fillStyle = "rgba(92, 122, 128, 0.85)";
+  ctx.fillText(`${Math.ceil(maxHorizontal)} m EN`, 10, 17);
+  ctx.fillText("E", rect.width - 18, cy - 6);
+  ctx.fillText("N", cx + 6, 14);
+
+  for (const point of points) {
+    const x = cx + point.eastM * scale;
+    const y = cy - point.northM * scale;
+    ctx.strokeStyle = "rgba(207, 233, 236, 0.18)";
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.fillStyle = solveScatterColor(point.key);
+    ctx.shadowColor = solveScatterColor(point.key);
+    ctx.shadowBlur = point.active ? 14 : 6;
+    ctx.beginPath();
+    ctx.arc(x, y, point.active ? 5.5 : 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = point.active ? "#eafcff" : "rgba(207, 233, 236, 0.78)";
+    ctx.fillText(point.label, x + 8, y - 7);
+    if (point.active || point.key === "none" || point.key === "both") {
+      ctx.fillStyle = "rgba(159, 196, 200, 0.82)";
+      ctx.fillText(fmtLen(point.errorM), x + 8, y + 8);
+    }
+  }
 }
 
 // Plain-language read of what the active config did relative to the RAW
@@ -925,6 +1100,7 @@ function updateNetPill() {
     "conj-net-pill",
     "iod-net-pill",
     "track-net-pill",
+    "rtk-net-pill",
   ]) {
     const pill = document.getElementById(id);
     if (!pill) continue;
@@ -1042,6 +1218,12 @@ let trackRaf = 0;
 let trackLastFrame = 0;
 let trackLastPaint = 0;
 let trackPanelVisible = false;
+
+let rtkState: RtkPanelState = createRtkPanelState();
+let rtkResult: RtkDemoResult | null = null;
+let rtkConvergence: RtkConvergencePoint[] = [];
+let rtkPlotRaf = 0;
+let rtkPlotStart = 0;
 
 // Static asset generated from GSDC 2020-05-14-US-MTV-1, Pixel4_GnssLog.20o,
 // and SPAN_Pixel4_10Hz.nmea. Dataset license: CC BY 4.0.
@@ -1346,6 +1528,210 @@ function toggleTrackReplay(): void {
   renderTrackPanel();
   if (trackState.playing) startTrackLoop();
   else stopTrackLoop();
+}
+
+// ---- RTK IN THE BROWSER ----------------------------------------------------
+function rtkPhaseLabel(): string {
+  if (rtkState.phase === "complete" && rtkResult?.fixedStatus === "Fixed") return "FIXED";
+  if (rtkState.phase === "error") return "ERROR";
+  return rtkState.phase.toUpperCase();
+}
+
+function fmtSigned(m: number, digits = 6): string {
+  return `${m >= 0 ? "+" : ""}${m.toFixed(digits)}`;
+}
+
+function fmtMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "waiting";
+  return `${ms.toFixed(1)} ms`;
+}
+
+function fmtRatio(v: number | undefined): string {
+  return v === undefined ? "waiting" : v.toFixed(2);
+}
+
+function renderRtkPanel(): void {
+  const run = document.getElementById("rtk-run") as HTMLButtonElement | null;
+  const status = document.getElementById("rtk-status");
+  const baseline = document.getElementById("rtk-baseline");
+  const error = document.getElementById("rtk-error");
+  const ratio = document.getElementById("rtk-ratio");
+  const wall = document.getElementById("rtk-wall");
+  const table = document.getElementById("rtk-errors");
+  const foot = document.getElementById("rtk-foot");
+  if (run) run.disabled = rtkState.running || !rtkAssets;
+  if (status) {
+    status.textContent = rtkPhaseLabel();
+    status.classList.toggle("fixed", rtkState.phase === "complete" && rtkResult?.fixedStatus === "Fixed");
+    status.classList.toggle("busy", rtkState.running);
+    status.classList.toggle("error", rtkState.phase === "error");
+  }
+  if (!rtkResult) {
+    if (baseline) baseline.textContent = rtkState.error ?? "waiting";
+    if (error) error.textContent = "waiting";
+    if (ratio) ratio.textContent = "waiting";
+    if (wall) wall.textContent = fmtMs(rtkState.wallMs);
+    if (table) table.innerHTML = '<div class="muted">run the RTK solve</div>';
+    drawRtkCanvas(0);
+    updateNetPill();
+    return;
+  }
+
+  const b = rtkResult.fixedBaselineM;
+  if (baseline) baseline.textContent = `X ${fmtSigned(b[0])} · Y ${fmtSigned(b[1])} · Z ${fmtSigned(b[2])} m`;
+  if (error) error.textContent = `${fmtLen(rtkResult.fixedErrorM)} fixed · ${fmtLen(rtkResult.floatErrorM)} float`;
+  if (ratio) ratio.textContent = `${fmtRatio(rtkResult.fixedRatio)} · WL ${rtkResult.wideLaneCount}`;
+  if (wall) wall.textContent = fmtMs(rtkResult.wallMs);
+  if (table) {
+    const rows: [string, string, string][] = [
+      ["EPOCHS", `${rtkResult.epochs} obs`, `${rtkResult.sp3Epochs} sp3`],
+      ["BASELINE LENGTH", fmtLen(rtkResult.truthLengthM), "ITRF truth"],
+      ["FLOAT ERROR", fmtLen(rtkResult.floatErrorM), fmtMs(rtkResult.floatMs)],
+      ["FIXED ERROR", fmtLen(rtkResult.fixedErrorM), fmtMs(rtkResult.fixedMs)],
+      ["ARC BUILD", fmtMs(rtkResult.buildMs), `${rtkConvergence.length} states`],
+    ];
+    table.innerHTML =
+      `<div class="cmp-row cmp-head"><span class="k"></span><span class="v">VALUE</span><span class="v amber">DETAIL</span></div>` +
+      rows
+        .map(
+          ([k, a, c]) =>
+            `<div class="cmp-row"><span class="k">${k}</span><span class="v">${a}</span><span class="v">${c}</span></div>`,
+        )
+        .join("");
+  }
+  if (foot && rtkAssets) {
+    foot.textContent =
+      `${rtkAssets.provenance.source} · ${rtkAssets.provenance.totalBytes.toLocaleString()} B · ` +
+      `${rtkResult.baseStation} to ${rtkResult.roverStation} · public IGS data attribution`;
+  }
+  updateNetPill();
+}
+
+function drawRtkCanvas(progress = 1): void {
+  const canvas = document.getElementById("rtk-canvas") as HTMLCanvasElement | null;
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = Math.max(1, Math.round(rect.width * dpr));
+  const h = Math.max(1, Math.round(rect.height * dpr));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+  ctx.fillStyle = "rgba(5, 7, 13, 0.92)";
+  ctx.fillRect(0, 0, rect.width, rect.height);
+
+  const cx = rect.width * 0.5;
+  const cy = rect.height * 0.5;
+  const maxErr = Math.max(0.006, ...rtkConvergence.map((point) => point.errorM), rtkResult?.fixedErrorM ?? 0);
+  const scale = (Math.min(rect.width, rect.height) * 0.5 - 30) / maxErr;
+  ctx.strokeStyle = "rgba(53, 224, 216, 0.08)";
+  ctx.lineWidth = 1;
+  for (let ring = 1; ring <= 3; ring++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (ring / 3) * maxErr * scale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(94, 242, 160, 0.5)";
+  ctx.beginPath();
+  ctx.moveTo(cx - 12, cy);
+  ctx.lineTo(cx + 12, cy);
+  ctx.moveTo(cx, cy - 12);
+  ctx.lineTo(cx, cy + 12);
+  ctx.stroke();
+  ctx.font = "10px IBM Plex Mono, monospace";
+  ctx.fillStyle = "rgba(207, 233, 236, 0.72)";
+  ctx.fillText("ITRF TRUTH", cx + 15, cy - 9);
+  ctx.fillStyle = "rgba(92, 122, 128, 0.88)";
+  ctx.fillText(`${(maxErr * 1000).toFixed(1)} mm dX/dY`, 10, 17);
+
+  if (!rtkResult || rtkConvergence.length === 0) return;
+  const shown = Math.max(1, Math.floor(rtkConvergence.length * Math.max(0, Math.min(1, progress))));
+  ctx.strokeStyle = "rgba(53, 224, 216, 0.72)";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  for (let i = 0; i < shown; i++) {
+    const point = rtkConvergence[i];
+    const x = cx + (point.baselineM[0] - rtkResult.truthBaselineM[0]) * scale;
+    const y = cy - (point.baselineM[1] - rtkResult.truthBaselineM[1]) * scale;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  const last = rtkConvergence[shown - 1];
+  const lx = cx + (last.baselineM[0] - rtkResult.truthBaselineM[0]) * scale;
+  const ly = cy - (last.baselineM[1] - rtkResult.truthBaselineM[1]) * scale;
+  ctx.fillStyle = "#35e0d8";
+  ctx.shadowColor = "#35e0d8";
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.arc(lx, ly, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  const fx = cx + (rtkResult.fixedBaselineM[0] - rtkResult.truthBaselineM[0]) * scale;
+  const fy = cy - (rtkResult.fixedBaselineM[1] - rtkResult.truthBaselineM[1]) * scale;
+  ctx.fillStyle = "#ffb347";
+  ctx.shadowColor = "#ffb347";
+  ctx.shadowBlur = 14;
+  ctx.beginPath();
+  ctx.arc(fx, fy, 5.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = "#eafcff";
+  ctx.fillText(`${fmtLen(rtkResult.fixedErrorM)} FIXED`, fx + 8, fy - 7);
+}
+
+function startRtkPlotAnimation(): void {
+  if (rtkPlotRaf) cancelAnimationFrame(rtkPlotRaf);
+  rtkPlotStart = performance.now();
+  const tick = (now: number) => {
+    const t = Math.min(1, (now - rtkPlotStart) / 900);
+    drawRtkCanvas(1 - Math.pow(1 - t, 3));
+    if (t < 1) rtkPlotRaf = requestAnimationFrame(tick);
+    else rtkPlotRaf = 0;
+  };
+  rtkPlotRaf = requestAnimationFrame(tick);
+}
+
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+async function runRtkPanel(): Promise<void> {
+  if (!rtkAssets || rtkState.running) return;
+  rtkResult = null;
+  rtkConvergence = [];
+  rtkState = beginRtkPanelRun(rtkState, performance.now());
+  renderRtkPanel();
+  await nextPaint();
+  try {
+    rtkState = advanceRtkPanelPhase(rtkState, "building");
+    renderRtkPanel();
+    await nextPaint();
+    rtkState = advanceRtkPanelPhase(rtkState, "float");
+    renderRtkPanel();
+    await nextPaint();
+    const result = solveRtkDemo(rtkAssets);
+    rtkResult = result;
+    rtkConvergence = buildRtkConvergencePoints(result.convergence, result.truthBaselineM);
+    rtkState = advanceRtkPanelPhase(rtkState, "fixed");
+    renderRtkPanel();
+    await nextPaint();
+    rtkState = completeRtkPanelRun(rtkState, performance.now());
+    renderRtkPanel();
+    startRtkPlotAnimation();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    rtkState = failRtkPanelRun(rtkState, msg, performance.now());
+    showError("RTK solve failed", e);
+    renderRtkPanel();
+  }
 }
 
 // ---- IONEX TEC -------------------------------------------------------------
@@ -2004,6 +2390,15 @@ function refreshSolveOverlay() {
     <div class="trace">
       <span class="tr-node">RINEX OBS + BROADCAST NAV</span><span class="tr-arrow">→</span><span class="tr-node engine">solveBroadcast() · Rust→WASM</span><span class="tr-arrow">→</span><span class="tr-node">ECEF → LLH</span>
     </div>
+    <div class="solve-visual">
+      <canvas id="ov-solve-scatter" class="solve-scatter-canvas" aria-label="ENU solve scatter"></canvas>
+      <div class="solve-scatter-key" aria-label="Solve scatter legend">
+        <span><i class="raw"></i>RAW</span>
+        <span><i class="iono"></i>IONO</span>
+        <span><i class="tropo"></i>TROPO</span>
+        <span><i class="both"></i>BOTH</span>
+      </div>
+    </div>
     <div class="ov-cols">
       <div class="ov-col">
         <div class="ov-sub">RAW VS ${cfg} · same ${p.obsCount}-observation epoch</div>
@@ -2025,6 +2420,8 @@ function refreshSolveOverlay() {
     </div>
     <div class="ov-prov">inputs: real IGS station ${p.station} (Guadeloupe) RINEX obs (${p.obsFile}) + broadcast nav (${p.navFile}) · reception epoch ${epoch} · station ${p.stationLatDeg.toFixed(3)}°, ${p.stationLonDeg.toFixed(3)}° · ${p.constellations} · ${c.usedSats.length}/${p.obsCount} satellites used (active)</div>
   `;
+  const scatter = document.getElementById("ov-solve-scatter") as HTMLCanvasElement | null;
+  if (scatter && solveScatterPoints.length) drawSolveScatterCanvas(scatter, solveScatterPoints);
 }
 
 function renderSkyOverlay() {
@@ -2422,6 +2819,11 @@ function setupObservers() {
       markGlobeFramingDirty();
       applyGlobeFraming();
       renderTrackPanel();
+      renderRtkPanel();
+      if (solveScatterPoints.length) {
+        const canvas = document.getElementById("solve-scatter") as HTMLCanvasElement | null;
+        if (canvas) drawSolveScatterCanvas(canvas, solveScatterPoints);
+      }
     },
     { passive: true },
   );
@@ -2582,6 +2984,7 @@ function wire() {
     stopTrackLoop();
     resetTrackRuntime(false);
   });
+  $("rtk-run").addEventListener("click", () => void runRtkPanel());
   ($("track-speed") as HTMLInputElement).addEventListener("input", (e) => {
     const speed = Number((e.target as HTMLInputElement).value) || 24;
     trackState = setTrackReplaySpeed(trackState, speed);
