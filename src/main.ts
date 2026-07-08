@@ -1160,6 +1160,26 @@ function updateNetPill() {
 // interval, with its compute time, server count, satellites used, and how far
 // the fix lands from ABMF's surveyed coordinate. Same WASM core as the deeper
 // live section below.
+// Prepend each constellation name with a dot in the same hue used to render its
+// orbits on the globe, sourced from the shared colors.ts palette.
+function constellationsWithDots(list: string): string {
+  const colorByName: Record<string, string> = {
+    GPS: CONSTELLATION.GPS.css,
+    GLONASS: CONSTELLATION.GLO.css,
+    Galileo: CONSTELLATION.GAL.css,
+    BeiDou: CONSTELLATION.BDS.css,
+    QZSS: "#b39ddb",
+  };
+  return list
+    .split(" \u00b7 ")
+    .map((name) => {
+      const c = colorByName[name.trim()];
+      const dot = c ? `<span class="con-dot" style="background:${c};box-shadow:0 0 5px ${c}"></span>` : "";
+      return `${dot}${name}`;
+    })
+    .join(" \u00b7 ");
+}
+
 function updateHeroReadout(fix: SppResult) {
   const el = document.getElementById("hero-readout");
   if (!el) return;
@@ -1180,7 +1200,7 @@ function updateHeroReadout(fix: SppResult) {
     `<span><i>sats used</i><b>${fix.usedCount}</b></span>` +
     `<span><i>pseudoranges</i><b>${fix.obsCount}</b></span>` +
     `</div>` +
-    `<div class="hr-sats">solving real recorded ${sppData?.provenance.constellations ?? ""} pseudoranges</div>` +
+    `<div class="hr-sats">solving real recorded ${constellationsWithDots(sppData?.provenance.constellations ?? "")} pseudoranges</div>` +
     `<div class="hr-hint">drag to orbit · click the globe to drop an observer</div>`;
 }
 
