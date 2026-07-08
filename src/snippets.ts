@@ -6,7 +6,7 @@
 //   C       sidereon-c/bindings/c/include/sidereon.h
 //   Elixir  sidereon-ex/lib/sidereon.ex + lib/sidereon/gnss/*
 //   JS/WASM sidereon-wasm/pkg/sidereon.d.ts
-// One engine, every language.
+// One engine, five languages.
 
 export type CapId = "propagate" | "spp";
 export type LangId = "rust" | "python" | "c" | "elixir" | "js";
