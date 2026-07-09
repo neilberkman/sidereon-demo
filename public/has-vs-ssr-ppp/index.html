@@ -33,12 +33,45 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 .downloads h2 { margin-top: 0; border: none; }
 .downloads ul { margin: 8px 0 0; padding-left: 18px; }
 .foot { margin-top: 40px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line-soft); padding-top: 16px; }
+.convergence-section { margin: 38px 0 8px; }
+.convergence-section h2 { margin-top: 0; }
+.convergence-note { color: var(--muted); font-size: 12.5px; margin: 0 0 18px; }
+.convergence-card { border: 1px solid var(--line); background: rgba(8,13,20,0.56); border-radius: 6px; padding: 13px 14px 10px; margin: 16px 0; }
+.convergence-head { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin-bottom: 8px; }
+.convergence-title { color: #eafcfb; font-weight: 600; letter-spacing: 0.08em; }
+.convergence-final { color: var(--muted); font-size: 11.5px; text-align: right; }
+.convergence-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.convergence-svg text { font-family: var(--mono); fill: var(--muted); font-size: 10px; }
+.convergence-svg .axis { stroke: var(--line); stroke-width: 1; }
+.convergence-svg .grid { stroke: var(--line-soft); stroke-width: 1; }
+.convergence-svg .threshold { stroke: rgba(207,233,236,0.22); stroke-width: 1; stroke-dasharray: 4 5; }
+.convergence-svg .series { fill: none; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.convergence-svg .series.broadcast { stroke: #cfe9ec; }
+.convergence-svg .series.has { stroke: var(--cyan); }
+.convergence-svg .series.igs { stroke: #ffb347; }
+.convergence-svg .mark.broadcast { fill: #cfe9ec; }
+.convergence-svg .mark.has { fill: var(--cyan); }
+.convergence-svg .mark.igs { fill: #ffb347; }
+.convergence-svg .label { fill: #eafcfb; font-size: 9.5px; paint-order: stroke; stroke: var(--ink); stroke-width: 4px; stroke-linejoin: round; }
+.convergence-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 11px; margin-top: 6px; }
+.convergence-legend span::before { content: ""; display: inline-block; width: 18px; height: 2px; margin-right: 6px; vertical-align: middle; background: currentColor; }
+.convergence-legend .broadcast { color: #cfe9ec; }
+.convergence-legend .has { color: var(--cyan); }
+.convergence-legend .igs { color: #ffb347; }
+@media (max-width: 620px) {
+  .convergence-card { padding: 11px 10px 9px; }
+  .convergence-head { display: block; }
+  .convergence-final { text-align: left; margin-top: 2px; }
+}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="site"><a href="/">sidereon</a> / analyses</div>
   <h1 id="gpsgalileo-ppp-replay-with-orbitclock-corrections-and-partial-reachable-code-bias-application">GPS+Galileo PPP replay with orbit/clock corrections and partial reachable code-bias application</h1>
+  <p class="meta">Context: this replay follows a question asked in the comments of
+  <a href="https://rtklibexplorer.wordpress.com/2026/06/14/using-ssr-corrections-with-rtklib-for-ppp-solutions-revisited/">rtklibexplorer&rsquo;s post on SSR corrections for PPP</a>,
+  about how Galileo HAS compares to SSR correction streams.</p>
 <h2 id="scope">Scope</h2>
 <p>Stations: DLF1, DYNG, and EBRE from the IGS/EUREF high-rate archive. Observation epochs are identical for broadcast, HAS-corrected, and IGS-corrected PPP. Constellations: GPS and Galileo only.</p>
 <p>This is not an LG290P chipset result. This is a controlled RINEX replay through one sidereon 0.24.0 batch PPP path.</p>
@@ -335,6 +368,7 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 </tr>
 </tbody>
 </table></div>
+<div id="convergence-mount"></div>
 <h2 id="satellite-set-check">Satellite Set Check</h2>
 <p>Result in <code>output/satellite_set_check.csv</code>: identical GPS+Galileo used satellites across broadcast, HAS, and IGS for every solved station prefix: True. GLONASS, BeiDou, and other systems are not processed.</p>
 <h2 id="limitations">Limitations</h2>
@@ -375,5 +409,225 @@ python run_ppp_comparison_v2.py</pre>
     <a href="/static-occupation">CORS static occupation example</a>
   </div>
 </div>
+<script>
+(() => {
+  const mount = document.getElementById("convergence-mount");
+  if (!mount) return;
+
+  const sources = [
+    { key: "broadcast", label: "broadcast" },
+    { key: "has", label: "HAS" },
+    { key: "igs", label: "IGS SSR" },
+  ];
+  const thresholds = [0.5, 0.3];
+  const ns = "http://www.w3.org/2000/svg";
+
+  function splitCsvLine(line) {
+    const out = [];
+    let cell = "";
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"' && line[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (ch === '"') {
+        quoted = !quoted;
+      } else if (ch === "," && !quoted) {
+        out.push(cell);
+        cell = "";
+      } else {
+        cell += ch;
+      }
+    }
+    out.push(cell);
+    return out;
+  }
+
+  function parseCsv(text) {
+    const lines = text.trim().split(/\r?\n/);
+    const header = splitCsvLine(lines.shift());
+    return lines.filter(Boolean).map((line) => {
+      const cells = splitCsvLine(line);
+      const row = {};
+      header.forEach((key, i) => {
+        row[key] = cells[i] ?? "";
+      });
+      return row;
+    });
+  }
+
+  function el(tag, attrs = {}, text = "") {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
+    if (text) node.textContent = text;
+    return node;
+  }
+
+  function sustainedCrossing(points, threshold) {
+    for (let i = 0; i < points.length; i++) {
+      const tail = points.slice(i);
+      if (tail.length >= 3 && tail.every((point) => point.y <= threshold)) return points[i];
+    }
+    return null;
+  }
+
+  function fmtMinutes(seconds) {
+    return `${Math.round(seconds / 60)} min`;
+  }
+
+  function fmtFinal(value) {
+    return `${value.toFixed(3)} m`;
+  }
+
+  function drawChart(station, rows) {
+    const card = document.createElement("div");
+    card.className = "convergence-card";
+    const head = document.createElement("div");
+    head.className = "convergence-head";
+    const title = document.createElement("div");
+    title.className = "convergence-title";
+    title.textContent = station;
+    const final = document.createElement("div");
+    final.className = "convergence-final";
+    head.append(title, final);
+    card.append(head);
+
+    const bySource = new Map();
+    for (const source of sources) bySource.set(source.key, []);
+    rows
+      .filter((row) => row.status === "ok" && row.station === station)
+      .forEach((row) => {
+        const x = Number(row.elapsed_s);
+        const y = Number(row.horizontal_error_m);
+        if (Number.isFinite(x) && Number.isFinite(y) && y > 0 && bySource.has(row.source)) {
+          bySource.get(row.source).push({ x, y });
+        }
+      });
+    for (const points of bySource.values()) points.sort((a, b) => a.x - b.x);
+    final.textContent = sources
+      .map((source) => {
+        const points = bySource.get(source.key);
+        return points.length ? `${source.label} ${fmtFinal(points[points.length - 1].y)}` : "";
+      })
+      .filter(Boolean)
+      .join(" / ");
+
+    const all = [...bySource.values()].flat();
+    if (!all.length) return card;
+
+    const width = 820;
+    const height = 330;
+    const margin = { top: 18, right: 22, bottom: 42, left: 58 };
+    const plotW = width - margin.left - margin.right;
+    const plotH = height - margin.top - margin.bottom;
+    const xMax = Math.max(...all.map((point) => point.x));
+    const rawMin = Math.min(...all.map((point) => point.y), 0.3);
+    const rawMax = Math.max(...all.map((point) => point.y), 0.5);
+    const yMin = Math.max(0.05, rawMin * 0.72);
+    const yMax = rawMax * 1.18;
+    const logMin = Math.log10(yMin);
+    const logMax = Math.log10(yMax);
+    const x = (value) => margin.left + (value / xMax) * plotW;
+    const y = (value) => margin.top + ((logMax - Math.log10(value)) / (logMax - logMin)) * plotH;
+
+    const svg = el("svg", { class: "convergence-svg", viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${station} horizontal error convergence` });
+    const ticks = [0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10].filter((tick) => tick >= yMin && tick <= yMax);
+    for (const tick of ticks) {
+      const yy = y(tick);
+      svg.append(el("line", { class: "grid", x1: margin.left, y1: yy, x2: width - margin.right, y2: yy }));
+      svg.append(el("text", { x: margin.left - 9, y: yy + 3, "text-anchor": "end" }, tick < 1 ? tick.toFixed(2).replace(/0$/, "") : String(tick)));
+    }
+    for (let minute = 0; minute <= xMax / 60 + 0.1; minute += 15) {
+      const xx = x(minute * 60);
+      svg.append(el("line", { class: "grid", x1: xx, y1: margin.top, x2: xx, y2: height - margin.bottom }));
+      svg.append(el("text", { x: xx, y: height - 18, "text-anchor": "middle" }, `${minute}`));
+    }
+    for (const threshold of thresholds) {
+      if (threshold >= yMin && threshold <= yMax) {
+        const yy = y(threshold);
+        svg.append(el("line", { class: "threshold", x1: margin.left, y1: yy, x2: width - margin.right, y2: yy }));
+        svg.append(el("text", { x: width - margin.right - 2, y: yy - 5, "text-anchor": "end" }, `${threshold.toFixed(1)} m`));
+      }
+    }
+    svg.append(el("line", { class: "axis", x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom }));
+    svg.append(el("line", { class: "axis", x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom }));
+    svg.append(el("text", { x: margin.left + plotW / 2, y: height - 2, "text-anchor": "middle" }, "elapsed time (min)"));
+    svg.append(el("text", { x: 12, y: margin.top + plotH / 2, transform: `rotate(-90 12 ${margin.top + plotH / 2})`, "text-anchor": "middle" }, "horizontal error (m, log)"));
+
+    for (const source of sources) {
+      const points = bySource.get(source.key);
+      if (!points.length) continue;
+      const path = points.map((point, i) => `${i === 0 ? "M" : "L"}${x(point.x).toFixed(1)} ${y(point.y).toFixed(1)}`).join(" ");
+      svg.append(el("path", { class: `series ${source.key}`, d: path }));
+    }
+
+    const annotations = [];
+    for (const source of sources) {
+      const points = bySource.get(source.key);
+      for (const threshold of thresholds) {
+        const hit = sustainedCrossing(points, threshold);
+        if (!hit) continue;
+        annotations.push({
+          source,
+          hit,
+          threshold,
+          px: x(hit.x),
+          py: y(hit.y),
+          text: `${source.label} <=${threshold.toFixed(1)}m @ ${fmtMinutes(hit.x)}`,
+        });
+      }
+    }
+    annotations.sort((a, b) => a.py - b.py || a.px - b.px);
+    const minLabelGap = 16;
+    for (let i = 0; i < annotations.length; i++) {
+      annotations[i].labelY = Math.max(margin.top + 12, annotations[i].py - 6);
+      if (i > 0) annotations[i].labelY = Math.max(annotations[i].labelY, annotations[i - 1].labelY + minLabelGap);
+    }
+    const overflow = annotations.length ? annotations[annotations.length - 1].labelY - (height - margin.bottom - 6) : 0;
+    if (overflow > 0) {
+      for (const annotation of annotations) annotation.labelY -= overflow;
+      for (let i = annotations.length - 2; i >= 0; i--) {
+        annotations[i].labelY = Math.min(annotations[i].labelY, annotations[i + 1].labelY - minLabelGap);
+      }
+    }
+    for (const annotation of annotations) {
+      const xx = Math.max(margin.left + 5, Math.min(width - margin.right - 128, annotation.px + 8));
+      const yy = Math.max(margin.top + 12, Math.min(height - margin.bottom - 6, annotation.labelY));
+      svg.append(el("circle", { class: `mark ${annotation.source.key}`, cx: annotation.px, cy: annotation.py, r: 3.3 }));
+      if (Math.abs(yy - annotation.py) > 8) {
+        svg.append(el("line", { class: "threshold", x1: annotation.px + 4, y1: annotation.py, x2: xx - 4, y2: yy - 3 }));
+      }
+      svg.append(el("text", { class: "label", x: xx, y: yy }, annotation.text));
+    }
+
+    card.append(svg);
+    const legend = document.createElement("div");
+    legend.className = "convergence-legend";
+    legend.innerHTML = '<span class="broadcast">broadcast</span><span class="has">HAS</span><span class="igs">IGS SSR</span>';
+    card.append(legend);
+    return card;
+  }
+
+  fetch("files/convergence_all.csv")
+    .then((response) => {
+      if (!response.ok) throw new Error(`convergence CSV ${response.status}`);
+      return response.text();
+    })
+    .then((text) => {
+      const rows = parseCsv(text);
+      const stations = Array.from(new Set(rows.map((row) => row.station).filter(Boolean))).sort();
+      if (!stations.length) return;
+      const section = document.createElement("section");
+      section.className = "convergence-section";
+      section.innerHTML = '<h2 id="convergence-charts">Convergence Charts</h2><p class="convergence-note">Horizontal error is plotted on a log scale from solved prefixes only. Labels mark the first prefix whose tail stays at or below the threshold for at least three solved prefixes.</p>';
+      stations.forEach((station) => section.append(drawChart(station, rows)));
+      mount.replaceChildren(section);
+    })
+    .catch((error) => {
+      console.warn("[sidereon] convergence charts skipped:", error);
+    });
+})();
+</script>
 </body>
 </html>

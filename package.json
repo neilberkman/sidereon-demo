@@ -9,6 +9,8 @@
     "prebuild": "node scripts/fetch-data.mjs",
     "build": "vite build",
     "preview": "vite preview --port 4173",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run typecheck",
     "test": "rm -rf .tmp/test && tsc -p tsconfig.test.json && node --test .tmp/test/tests/*.js"
   },
   "dependencies": {
