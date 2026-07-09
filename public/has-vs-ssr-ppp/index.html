@@ -52,7 +52,7 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 .convergence-svg .mark.broadcast { fill: #cfe9ec; }
 .convergence-svg .mark.has { fill: var(--cyan); }
 .convergence-svg .mark.igs { fill: #ffb347; }
-.convergence-svg .label { fill: #eafcfb; font-size: 9.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+.convergence-svg .label { fill: #eafcfb; font-size: 9.5px; paint-order: stroke; stroke: var(--ink); stroke-width: 4px; stroke-linejoin: round; }
 .convergence-legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 11px; margin-top: 6px; }
 .convergence-legend span::before { content: ""; display: inline-block; width: 18px; height: 2px; margin-right: 6px; vertical-align: middle; background: currentColor; }
 .convergence-legend .broadcast { color: #cfe9ec; }
@@ -69,6 +69,9 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 <div class="wrap">
   <div class="site"><a href="/">sidereon</a> / analyses</div>
   <h1 id="gpsgalileo-ppp-replay-with-orbitclock-corrections-and-partial-reachable-code-bias-application">GPS+Galileo PPP replay with orbit/clock corrections and partial reachable code-bias application</h1>
+  <p class="meta">Context: this replay follows a question asked in the comments of
+  <a href="https://rtklibexplorer.wordpress.com/2026/06/14/using-ssr-corrections-with-rtklib-for-ppp-solutions-revisited/">rtklibexplorer&rsquo;s post on SSR corrections for PPP</a>,
+  about how Galileo HAS compares to SSR correction streams.</p>
 <h2 id="scope">Scope</h2>
 <p>Stations: DLF1, DYNG, and EBRE from the IGS/EUREF high-rate archive. Observation epochs are identical for broadcast, HAS-corrected, and IGS-corrected PPP. Constellations: GPS and Galileo only.</p>
 <p>This is not an LG290P chipset result. This is a controlled RINEX replay through one sidereon 0.24.0 batch PPP path.</p>
@@ -576,7 +579,7 @@ python run_ppp_comparison_v2.py</pre>
       }
     }
     annotations.sort((a, b) => a.py - b.py || a.px - b.px);
-    const minLabelGap = 13;
+    const minLabelGap = 16;
     for (let i = 0; i < annotations.length; i++) {
       annotations[i].labelY = Math.max(margin.top + 12, annotations[i].py - 6);
       if (i > 0) annotations[i].labelY = Math.max(annotations[i].labelY, annotations[i - 1].labelY + minLabelGap);
