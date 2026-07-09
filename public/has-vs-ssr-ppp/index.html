@@ -396,9 +396,9 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
     <pre>pip install sidereon==0.24.0
 python run_ppp_comparison_v2.py</pre>
     <ul>
-      <li><a href="files/run_ppp_comparison_v2.py">run_ppp_comparison_v2.py</a> (the full pipeline)</li>
-      <li><a href="files/convergence_all.csv">convergence_all.csv</a> &middot; <a href="files/station_summary.csv">station_summary.csv</a> &middot; <a href="files/cross_station_summary.csv">cross_station_summary.csv</a></li>
-      <li><a href="files/code_bias_usage.csv">code_bias_usage.csv</a> &middot; <a href="files/correction_coverage.csv">correction_coverage.csv</a> &middot; <a href="files/satellite_set_check.csv">satellite_set_check.csv</a></li>
+      <li><a href="/has-vs-ssr-ppp/files/run_ppp_comparison_v2.py">run_ppp_comparison_v2.py</a> (the full pipeline)</li>
+      <li><a href="/has-vs-ssr-ppp/files/convergence_all.csv">convergence_all.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/station_summary.csv">station_summary.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/cross_station_summary.csv">cross_station_summary.csv</a></li>
+      <li><a href="/has-vs-ssr-ppp/files/code_bias_usage.csv">code_bias_usage.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/correction_coverage.csv">correction_coverage.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/satellite_set_check.csv">satellite_set_check.csv</a></li>
     </ul>
   </div>
   <div class="foot">
@@ -609,7 +609,7 @@ python run_ppp_comparison_v2.py</pre>
     return card;
   }
 
-  fetch("files/convergence_all.csv")
+  fetch("/has-vs-ssr-ppp/files/convergence_all.csv")
     .then((response) => {
       if (!response.ok) throw new Error(`convergence CSV ${response.status}`);
       return response.text();
