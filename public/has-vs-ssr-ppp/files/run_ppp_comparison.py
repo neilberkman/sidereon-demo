@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run the public PPP correction comparison.
 
-This script expects sidereon==0.24.0 in the active Python environment.
+This script expects sidereon==0.25.0 in the active Python environment.
 It downloads public RINEX, broadcast NAV, ITRF station coordinates, and
 correction captures as needed into data/ beside this file, then writes the
 analysis outputs into output/.
@@ -916,8 +916,8 @@ def main() -> None:
     parser.add_argument("--min-epochs", type=int, default=3)
     args = parser.parse_args()
 
-    if getattr(sidereon, "__version__", "") != "0.24.0":
-        raise RuntimeError(f"expected sidereon==0.24.0, got {getattr(sidereon, '__version__', 'unknown')}")
+    if getattr(sidereon, "__version__", "") != "0.25.0":
+        raise RuntimeError(f"expected sidereon==0.25.0, got {getattr(sidereon, '__version__', 'unknown')}")
 
     ensure_inputs()
     if OUT.exists():

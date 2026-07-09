@@ -74,7 +74,7 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
   about how Galileo HAS compares to SSR correction streams.</p>
 <h2 id="scope">Scope</h2>
 <p>Stations: DLF1, DYNG, and EBRE from the IGS/EUREF high-rate archive. Observation epochs are identical for broadcast, HAS-corrected, and IGS-corrected PPP. Constellations: GPS and Galileo only.</p>
-<p>This is not an LG290P chipset result. This is a controlled RINEX replay through one sidereon 0.24.0 batch PPP path.</p>
+<p>This is not an LG290P chipset result. This is a controlled RINEX replay through one sidereon 0.25.0 batch PPP path.</p>
 <p>Correction inputs: committed HAS_SSRA00EUH0 and IGS_SSRA03IGS0 RTCM captures from 2026-07-08. CNES was not included in this fixture, so the IGS combined stream is the SSR reference stream here.</p>
 <h2 id="initialization">Initialization</h2>
 <p>ITRF2020 station coordinates are used only after each solve for scoring. PPP initialization starts from a truth-independent seed. Seed procedure: broadcast SPP from the same first-epoch observations, using the RINEX approximate position as the nonlinear initial guess and as fallback only after SPP failure.</p>
@@ -375,7 +375,7 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 <ul>
 <li>Single-day window: 2026-07-08 19:33:00 GPST to 2026-07-08 21:03:00 GPST.</li>
 <li>GPS plus Galileo only: excluded systems are GLONASS, BeiDou, QZSS, SBAS, and NavIC.</li>
-<li>Code-bias handling is partial: applied code-bias terms are limited to selected-signal biases reachable through sidereon 0.24.0's public <code>SsrCorrectionStore.code_bias(sat, signal)</code> API. Missing selected-signal biases remain unadjusted and are counted in <a href="/has-vs-ssr-ppp/files/code_bias_usage.csv"><code>code_bias_usage.csv</code></a>.</li>
+<li>Code-bias handling is partial: applied code-bias terms are limited to selected-signal biases reachable through sidereon 0.25.0's public <code>SsrCorrectionStore.code_bias(sat, signal)</code> API. Missing selected-signal biases remain unadjusted and are counted in <a href="/has-vs-ssr-ppp/files/code_bias_usage.csv"><code>code_bias_usage.csv</code></a>.</li>
 <li>Orbit and clock correction availability varies by stream. Broadcast fallback appears in the materialized SP3 files for missing corrected satellite states, with counts in <a href="/has-vs-ssr-ppp/files/correction_coverage.csv"><code>correction_coverage.csv</code></a>.</li>
 <li>CNES was not included in this fixture.</li>
 <li>SP3 materialization uses explicit SSR orbit/clock application. Corrected versus broadcast-fallback satellite-state counts are in <a href="/has-vs-ssr-ppp/files/correction_coverage.csv"><code>correction_coverage.csv</code></a>.</li>
@@ -393,7 +393,7 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
   <div class="downloads">
     <h2>Reproduce this</h2>
     <p>The script below runs against the published package. Files already present in <code>data/</code> beside the script are reused; otherwise it downloads public RINEX, NAV, ITRF, and correction-capture inputs.</p>
-    <pre>pip install sidereon==0.24.0
+    <pre>pip install sidereon==0.25.0
 python run_ppp_comparison.py</pre>
     <ul>
       <li><a href="/has-vs-ssr-ppp/files/run_ppp_comparison.py">run_ppp_comparison.py</a> (the pipeline script)</li>
@@ -403,7 +403,7 @@ python run_ppp_comparison.py</pre>
     </ul>
   </div>
   <div class="foot">
-    Computed with <a href="https://github.com/neilberkman/sidereon">sidereon</a> 0.24.0
+    Computed with <a href="https://github.com/neilberkman/sidereon">sidereon</a> 0.25.0
     (MIT, Rust core with Python/C/WASM/Elixir interfaces) &middot;
     <a href="/">live in-browser demo</a> &middot;
     <a href="/track-cleanup">phone-track cleanup example</a> &middot;
