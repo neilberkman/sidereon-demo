@@ -378,7 +378,7 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 <li>Code-bias handling is partial: applied code-bias terms are limited to selected-signal biases reachable through sidereon 0.24.0's public <code>SsrCorrectionStore.code_bias(sat, signal)</code> API. Missing selected-signal biases remain unadjusted and are counted in <a href="/has-vs-ssr-ppp/files/code_bias_usage.csv"><code>code_bias_usage.csv</code></a>.</li>
 <li>Orbit and clock correction availability varies by stream. Broadcast fallback appears in the materialized SP3 files for missing corrected satellite states, with counts in <a href="/has-vs-ssr-ppp/files/correction_coverage.csv"><code>correction_coverage.csv</code></a>.</li>
 <li>CNES was not included in this fixture.</li>
-<li>SP3 materialization uses explicit SSR orbit/clock application. <a href="/has-vs-ssr-ppp/files/api_surface_check.csv"><code>api_surface_check.csv</code></a> contains the sidereon 0.24.0 public-surface check: <code>SsrCorrectedEphemeris</code> is not accepted by <code>observable_states_at_j2000_s</code> for PPP-ready SP3 sampling.</li>
+<li>SP3 materialization uses explicit SSR orbit/clock application. Corrected versus broadcast-fallback satellite-state counts are in <a href="/has-vs-ssr-ppp/files/correction_coverage.csv"><code>correction_coverage.csv</code></a>.</li>
 </ul>
 <h2 id="outputs">Outputs</h2>
 <ul>
@@ -392,13 +392,13 @@ tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
 
   <div class="downloads">
     <h2>Reproduce this</h2>
-    <p>The script below runs against the published package. Correction captures and station RINEX resolve from committed fixtures and public archives.</p>
+    <p>The script below runs against the published package. Files already present in <code>data/</code> beside the script are reused; otherwise it downloads public RINEX, NAV, ITRF, and correction-capture inputs.</p>
     <pre>pip install sidereon==0.24.0
-python run_ppp_comparison_v2.py</pre>
+python run_ppp_comparison.py</pre>
     <ul>
-      <li><a href="/has-vs-ssr-ppp/files/run_ppp_comparison_v2.py">run_ppp_comparison_v2.py</a> (the pipeline script; it downloads station data from public archives and the correction captures from this page when run standalone)</li>
+      <li><a href="/has-vs-ssr-ppp/files/run_ppp_comparison.py">run_ppp_comparison.py</a> (the pipeline script)</li>
       <li><a href="/has-vs-ssr-ppp/files/convergence_all.csv">convergence_all.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/station_summary.csv">station_summary.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/cross_station_summary.csv">cross_station_summary.csv</a></li>
-      <li><a href="/has-vs-ssr-ppp/files/code_bias_usage.csv">code_bias_usage.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/correction_coverage.csv">correction_coverage.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/satellite_set_check.csv">satellite_set_check.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/api_surface_check.csv">api_surface_check.csv</a></li>
+      <li><a href="/has-vs-ssr-ppp/files/code_bias_usage.csv">code_bias_usage.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/correction_coverage.csv">correction_coverage.csv</a> &middot; <a href="/has-vs-ssr-ppp/files/satellite_set_check.csv">satellite_set_check.csv</a></li>
       <li>Correction captures (RTCM3, 2026-07-08 19:33 UTC window): <a href="/has-vs-ssr-ppp/files/data/corrections/HAS_SSRA00EUH0_20260708_1933.rtcm3">HAS_SSRA00EUH0</a> (1.6&nbsp;MB) &middot; <a href="/has-vs-ssr-ppp/files/data/corrections/IGS_SSRA03IGS0_20260708_1933.rtcm3">IGS_SSRA03IGS0</a> (2.2&nbsp;MB)</li>
     </ul>
   </div>

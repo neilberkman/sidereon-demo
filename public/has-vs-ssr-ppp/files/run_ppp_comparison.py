@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Reproduce the v2 PPP replay with truth-independent initialization.
+"""Run the public PPP correction comparison.
 
 This script expects sidereon==0.24.0 in the active Python environment.
-It downloads public RINEX inputs as needed and writes all generated artifacts
-under the v2 directory.
+It downloads public RINEX, broadcast NAV, ITRF station coordinates, and
+correction captures as needed into data/ beside this file, then writes the
+analysis outputs into output/.
+
+Produced outputs include per-source convergence CSVs, station and cross-station
+summaries, SPP seed diagnostics, code-bias usage, correction coverage,
+correction message inventory, satellite-set checks, and materialized SP3 files.
 """
 
 from __future__ import annotations
@@ -34,7 +39,6 @@ DAY_OF_YEAR = 189.0
 SUSTAINED_TAIL_EPOCHS = 3
 
 ROOT = Path(__file__).resolve().parent
-PARENT = ROOT.parent
 DATA = ROOT / "data"
 RAW = DATA / "raw"
 CORR = DATA / "corrections"
@@ -148,28 +152,17 @@ def download(url: str, path: Path) -> None:
         path.write_bytes(resp.read())
 
 
-def copy_or_download(source_path: Path, url: str, target: Path) -> None:
-    if target.exists() and target.stat().st_size > 0:
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if source_path.exists() and source_path.stat().st_size > 0:
-        shutil.copyfile(source_path, target)
-    else:
-        download(url, target)
-
-
 def ensure_inputs() -> None:
     RAW.mkdir(parents=True, exist_ok=True)
     CORR.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
     for spec in STATIONS:
         for url in observation_urls(spec):
-            parent_fixture = PARENT / "data" / "raw" / url.rsplit("/", 1)[1]
-            copy_or_download(parent_fixture, url, RAW / url.rsplit("/", 1)[1])
-    copy_or_download(PARENT / "data" / "raw" / NAV_URL.rsplit("/", 1)[1], NAV_URL, RAW / NAV_URL.rsplit("/", 1)[1])
-    copy_or_download(PARENT / "ITRF2020_GNSS.SSC.txt", ITRF_URL, DATA / "ITRF2020_GNSS.SSC.txt")
+            download(url, RAW / url.rsplit("/", 1)[1])
+    download(NAV_URL, RAW / NAV_URL.rsplit("/", 1)[1])
+    download(ITRF_URL, DATA / "ITRF2020_GNSS.SSC.txt")
     for name in ["HAS_SSRA00EUH0_20260708_1933.rtcm3", "IGS_SSRA03IGS0_20260708_1933.rtcm3"]:
-        copy_or_download(PARENT / "data" / "corrections" / name, f"{CORRECTIONS_BASE}/{name}", CORR / name)
+        download(f"{CORRECTIONS_BASE}/{name}", CORR / name)
 
 
 def decimal_year(dt: datetime) -> float:
@@ -268,8 +261,10 @@ def read_observation_files(spec: StationSpec) -> list[sidereon.RinexObs]:
     return obs
 
 
-def if_comb(v1: float, f1: float, v2: float, f2: float) -> float:
-    return (f1 * f1 * v1 - f2 * f2 * v2) / (f1 * f1 - f2 * f2)
+def if_comb(first_value: float, first_frequency: float, second_value: float, second_frequency: float) -> float:
+    return (
+        first_frequency * first_frequency * first_value - second_frequency * second_frequency * second_value
+    ) / (first_frequency * first_frequency - second_frequency * second_frequency)
 
 
 def observed_satellite_set(obs_files: list[sidereon.RinexObs]) -> set[str]:
@@ -314,7 +309,8 @@ def build_raw_epochs(obs_files: list[sidereon.RinexObs], step_s: int, allowed_sa
             tow = obs_epoch_tow(epoch_time)
             if tow < START_TOW or tow > END_TOW:
                 continue
-            if abs(((tow - START_TOW) / step_s) - round((tow - START_TOW) / step_s)) > 1e-6:
+            epoch_multiple = (tow - START_TOW) / step_s
+            if abs(epoch_multiple - math.floor(epoch_multiple + 0.5)) > 1e-6:
                 continue
             if last_tow is not None and abs(tow - last_tow) < 1e-6:
                 continue
@@ -348,7 +344,7 @@ def build_raw_epochs(obs_files: list[sidereon.RinexObs], step_s: int, allowed_sa
                 epoch_time.hour,
                 epoch_time.minute,
                 int(epoch_time.second),
-                int(round((epoch_time.second - int(epoch_time.second)) * 1_000_000)),
+                int(math.floor((epoch_time.second - int(epoch_time.second)) * 1_000_000 + 0.5)),
                 tzinfo=timezone.utc,
             )
             rows.append(RawEpoch(tow, dt, civil, jd.whole, jd.fraction, j2000, filtered))
@@ -914,218 +910,6 @@ def first_epoch_bias_check(bias_usage: list[dict[str, object]]) -> None:
         raise RuntimeError("first IGS observation epoch applied code biases before any IGS SSR bias message was available")
 
 
-def inventory_summary(inventory_rows: list[dict[str, object]]) -> str:
-    parts = []
-    for source in ["has", "igs"]:
-        subset = [row for row in inventory_rows if row["source"] == source]
-        counts = ", ".join(f"{row['rtcm_message_number']}={row['message_count']}" for row in subset)
-        parts.append(f"{source.upper()} {counts}")
-    return "; ".join(parts)
-
-
-def residual_summary(results: list[SourceResult]) -> list[dict[str, object]]:
-    rows = []
-    for source in ["broadcast", "has", "igs"]:
-        source_rows = [row for result in results if result.source == source for row in finite_rows(result.rows)]
-        final_rows = [finite_rows(result.rows)[-1] for result in results if result.source == source and finite_rows(result.rows)]
-        rows.append(
-            {
-                "source": source,
-                "solved_rows": len(source_rows),
-                "median_code_rms_m": f"{statistics.median(float(row['code_rms_m']) for row in source_rows):.4f}" if source_rows else "n/a",
-                "median_final_code_rms_m": f"{statistics.median(float(row['code_rms_m']) for row in final_rows):.4f}" if final_rows else "n/a",
-                "median_phase_rms_m": f"{statistics.median(float(row['phase_rms_m']) for row in source_rows):.4f}" if source_rows else "n/a",
-            }
-        )
-    return rows
-
-
-def api_surface_check(nav: sidereon.BroadcastEphemeris) -> list[dict[str, object]]:
-    rows = []
-    store = sidereon.SsrCorrectionStore()
-    try:
-        source = sidereon.SsrCorrectedEphemeris(nav, store, max_staleness_s=MAX_SSR_STALENESS_S)
-        sidereon.observable_states_at_j2000_s(source, ["G05"], np.array([sidereon.j2000_seconds(2026, 7, 8, 19, 43, 0.0)]))
-        status = "accepted"
-        detail = ""
-    except Exception as exc:
-        status = "not_accepted_by_observable_states_at_j2000_s"
-        detail = f"{type(exc).__name__}: {exc}"
-    rows.append(
-        {
-            "check": "SsrCorrectedEphemeris public evaluation path",
-            "status": status,
-            "detail": detail,
-        }
-    )
-    return rows
-
-
-def write_writeup(
-    summary_rows: list[dict[str, object]],
-    cross_rows: list[dict[str, object]],
-    seed_rows: list[dict[str, object]],
-    sat_checks: list[dict[str, object]],
-    bias_usage: list[dict[str, object]],
-    inventory_rows: list[dict[str, object]],
-    results: list[SourceResult],
-) -> None:
-    by_source = {row["source"]: row for row in cross_rows}
-    all_sat_ok = all(str(row["identical_across_sources"]) == "True" for row in sat_checks)
-    bias_totals = {}
-    for source in ["has", "igs"]:
-        subset = [row for row in bias_usage if row["source"] == source]
-        applied = sum(int(row["applied_code_bias_terms"]) for row in subset)
-        selected = sum(int(row["selected_code_bias_terms"]) for row in subset)
-        bias_totals[source] = (applied, selected)
-    residual_rows = residual_summary(results)
-    lines = [
-        "# GPS+Galileo PPP replay with orbit/clock corrections and partial reachable code-bias application",
-        "",
-        "## Scope",
-        "",
-        "Stations: DLF1, DYNG, and EBRE from the IGS/EUREF high-rate archive. Observation epochs are identical for broadcast, HAS-corrected, and IGS-corrected PPP. Constellations: GPS and Galileo only.",
-        "",
-        "This is not an LG290P chipset result. This is a controlled RINEX replay through one sidereon 0.24.0 batch PPP path.",
-        "",
-        "Correction inputs: committed HAS_SSRA00EUH0 and IGS_SSRA03IGS0 RTCM captures from 2026-07-08. CNES was not included in this fixture, so the IGS combined stream is the SSR reference stream here.",
-        "",
-        "## Initialization",
-        "",
-        "ITRF2020 station coordinates are used only after each solve for scoring. PPP initialization starts from a truth-independent seed. Seed procedure: broadcast SPP from the same first-epoch observations, using the RINEX approximate position as the nonlinear initial guess and as fallback only after SPP failure.",
-        "",
-        "| station | seed source | seed horizontal error (m) | seed 3D error (m) |",
-        "|---|---|---:|---:|",
-    ]
-    for row in seed_rows:
-        lines.append(f"| {row['station']} | {row['seed_source']} | {row['seed_horizontal_error_m']} | {row['seed_3d_error_m']} |")
-    lines.extend(
-        [
-            "",
-            "## Correction Components",
-            "",
-            "| component | broadcast | HAS | IGS combined |",
-            "|---|---|---|---|",
-            "| orbit | broadcast NAV | RTCM SSR/HAS when available, broadcast fallback otherwise | RTCM SSR when available, broadcast fallback otherwise |",
-            "| clock | broadcast NAV | RTCM SSR/HAS when available, broadcast fallback otherwise | RTCM SSR when available, broadcast fallback otherwise |",
-            "| high-rate clock | none | applied when present in combined orbit/clock message | applied when present in combined orbit/clock message |",
-            "| code bias | none | applied only where sidereon exposes the selected signal bias | applied only where sidereon exposes the selected signal bias |",
-            "| phase bias | none | not applied | not applied |",
-            "| ionosphere | dual-frequency IF combination | dual-frequency IF combination | dual-frequency IF combination |",
-            "| troposphere | estimated ZTD | estimated ZTD | estimated ZTD |",
-            "| antenna phase center | not applied | not applied | not applied |",
-            "",
-            f"Correction message inventory: {inventory_summary(inventory_rows)}.",
-            "",
-            f"Applied selected code-bias terms: HAS {bias_totals['has'][0]} of {bias_totals['has'][1]}; IGS {bias_totals['igs'][0]} of {bias_totals['igs'][1]}. Biases are applied only from SSR messages received at or before the observation epoch. The selected GPS/Galileo RINEX signal pairs do not have complete exposed bias coverage in either stream, so this artifact is not a complete HAS service versus SSR service comparison.",
-            "",
-            "## Residual Diagnostics",
-            "",
-            "| source | solved rows | median code RMS (m) | median final code RMS (m) | median phase RMS (m) |",
-            "|---|---:|---:|---:|---:|",
-        ]
-    )
-    for row in residual_rows:
-        lines.append(
-            f"| {row['source']} | {row['solved_rows']} | {row['median_code_rms_m']} | "
-            f"{row['median_final_code_rms_m']} | {row['median_phase_rms_m']} |"
-        )
-    lines.extend(
-        [
-            "",
-            "The residuals are solution diagnostics for this partial-bias, orbit/clock replay. They are not service-accuracy measurements.",
-            "",
-            "## Cross-Station Summary",
-            "",
-            "| source | stations | median final horizontal (m) | median final 3D (m) | median final 10 min horizontal (m) | 0.5 m horizontal successes | 0.3 m horizontal successes |",
-            "|---|---:|---:|---:|---:|---:|---:|",
-        ]
-    )
-    for source in ["broadcast", "has", "igs"]:
-        row = by_source[source]
-        lines.append(
-            f"| {source} | {row['station_count']} | {row['final_horizontal_m_median']} | {row['final_3d_m_median']} | "
-            f"{row['final_10min_horizontal_median_m_median']} | {row['reach_stay_under_0_5m_horizontal_s_success_count']} | "
-            f"{row['reach_stay_under_0_3m_horizontal_s_success_count']} |"
-        )
-    lines.extend(
-        [
-            "",
-            "## Per-Station Results",
-            "",
-            f"Threshold entries use sustained stay-below logic: the reported prefix and every later solved prefix must be at or below the threshold, with at least {SUSTAINED_TAIL_EPOCHS} solved prefixes in that tail. Endpoint-only threshold hits are not counted.",
-            "",
-            "| station | source | stay <=0.5 m horiz (s) | stay <=0.3 m horiz (s) | stay <=0.5 m 3D (s) | stay <=0.3 m 3D (s) | final horiz (m) | final 3D (m) | final 10 min horiz median (m) |",
-            "|---|---|---:|---:|---:|---:|---:|---:|---:|",
-        ]
-    )
-    for row in summary_rows:
-        lines.append(
-            f"| {row['station']} | {row['source']} | {row['reach_stay_under_0_5m_horizontal_s']} | "
-            f"{row['reach_stay_under_0_3m_horizontal_s']} | {row['reach_stay_under_0_5m_3d_s']} | "
-            f"{row['reach_stay_under_0_3m_3d_s']} | {row['final_horizontal_m']} | {row['final_3d_m']} | "
-            f"{row['final_10min_horizontal_median_m']} |"
-        )
-    lines.extend(
-        [
-            "",
-            "## Satellite Set Check",
-            "",
-            f"Result in `output/satellite_set_check.csv`: identical GPS+Galileo used satellites across broadcast, HAS, and IGS for every solved station prefix: {all_sat_ok}. GLONASS, BeiDou, and other systems are not processed.",
-            "",
-            "## Limitations",
-            "",
-            "- Single-day window: 2026-07-08 19:33:00 GPST to 2026-07-08 21:03:00 GPST.",
-            "- GPS plus Galileo only: excluded systems are GLONASS, BeiDou, QZSS, SBAS, and NavIC.",
-            "- Code-bias handling is partial: applied code-bias terms are limited to selected-signal biases reachable through sidereon 0.24.0's public `SsrCorrectionStore.code_bias(sat, signal)` API. Missing selected-signal biases remain unadjusted and are counted in `output/code_bias_usage.csv`.",
-            "- Orbit and clock correction availability varies by stream. Broadcast fallback appears in the materialized SP3 files for missing corrected satellite states, with counts in `output/correction_coverage.csv`.",
-            "- CNES was not included in this fixture.",
-            "- SP3 materialization uses explicit SSR orbit/clock application. `output/api_surface_check.csv` contains the sidereon 0.24.0 public-surface check: `SsrCorrectedEphemeris` is not accepted by `observable_states_at_j2000_s` for PPP-ready SP3 sampling.",
-            "",
-            "## Outputs",
-            "",
-            "- `output/convergence_all.csv`: per-prefix horizontal and 3D error time series.",
-            "- `output/station_summary.csv`: threshold and final-accuracy table per station and source.",
-            "- `output/cross_station_summary.csv`: cross-station medians and threshold success counts.",
-            "- `output/code_bias_usage.csv`: selected, applied, and missing code-bias term counts.",
-            "- `output/correction_coverage.csv`: corrected versus broadcast-fallback orbit/clock states.",
-            "- `output/satellite_set_check.csv`: same-satellite verification across the three runs.",
-        ]
-    )
-    (ROOT / "writeup_v2.md").write_text("\n".join(lines) + "\n")
-
-
-def write_v2_report() -> None:
-    lines = [
-        "# V2 Report",
-        "",
-        "| review item | v2 response |",
-        "|---|---|",
-            "| Truth initialization | PPP seeds come from a broadcast SPP attempt using the same first-epoch observations, with RINEX approximate fallback. ITRF2020 coordinates are only used for scoring and seed-error reporting. |",
-            "| Code biases | Selected-signal code biases exposed by `SsrCorrectionStore.code_bias` are applied from SSR messages received at or before each observation epoch. Missing selected-signal terms are counted in `output/code_bias_usage.csv`, and the writeup title/framing uses partial reachable code-bias application rather than a complete service comparison. |",
-            "| GPS plus Galileo only | `SIGNAL_PAIRS` contains GPS and Galileo only. `output/satellite_set_check.csv` has identical used satellites across broadcast, HAS, and IGS for every solved prefix. |",
-            "| Multiple arcs | The script processes DLF1, DYNG, and EBRE high-rate BKG/EUREF station files in the capture window. |",
-            f"| Convergence metrics | `output/convergence_all.csv` contains horizontal and 3D error time series from the truth-independent seed. `output/station_summary.csv` uses sustained stay-below thresholds requiring at least {SUSTAINED_TAIL_EPOCHS} solved prefixes in the under-threshold tail, plus final accuracy. |",
-        "| Environment | `run_ppp_comparison_v2.py` is a single end-to-end script for `sidereon==0.24.0`; the final check used a fresh venv. |",
-        "| Writeup constraints | `writeup_v2.md` includes Scope and Limitations sections, GPS+Galileo-only scope, single-day window, code-bias limits, full correction inventory, CNES fixture wording, and residual diagnostics. |",
-        "| Correction coverage | `output/correction_coverage.csv` and per-solution fallback columns include corrected and broadcast-fallback satellite states, including used-satellite fallback counts. |",
-        "| SsrCorrectedEphemeris surface | `output/api_surface_check.csv` contains the public API check. The generated writeup includes the reason SP3 materialization still uses explicit SSR orbit/clock application. |",
-        "",
-        "## Fix round",
-        "",
-        "| review finding | fix | regenerated evidence |",
-        "|---|---|---|",
-        "| IGS code-bias application leaked future state | `build_bias_stores_by_epoch()` now rebuilds an independent SSR store for each observation epoch using only messages received at or before that epoch. A first-epoch IGS guard raises if biases are applied before the first available IGS SSR bias message. | `output/code_bias_usage.csv`, `output/convergence_all.csv`, `output/station_summary.csv`, `writeup_v2.md` |",
-        "| Used corrected/fallback diagnostics were zeroed by suffixed satellite IDs | PPP used-satellite IDs are normalized to bare IDs before lookup against correction coverage. Counts are current-epoch, unique used satellite counts. | `output/convergence_all.csv` and per-station convergence CSVs |",
-        "| Endpoint-only threshold hits looked like convergence | Stay-below thresholds now require a sustained tail with at least three solved prefixes under threshold; tail epoch counts are included in station summaries. | `output/station_summary.csv`, `output/cross_station_summary.csv`, `writeup_v2.md` |",
-        "| Correction-message inventory wording was incomplete | The writeup now includes the full RTCM message-number inventory from the generated inventory rows. | `output/correction_message_inventory.csv`, `writeup_v2.md` |",
-        "| Residuals needed tighter framing | The writeup now includes code and phase RMS residual summaries and limits accuracy language to this partial-bias replay. | `output/convergence_all.csv`, `writeup_v2.md` |",
-        "| CNES availability claim was unsupported | The unsupported outage wording was replaced with fixture-only wording: CNES was not included in this fixture. | `writeup_v2.md` |",
-        "| Reverification requested | The fix round was rerun in a fresh `sidereon==0.24.0` venv twice, then artifacts were compared byte-for-byte and scanned for banned text. | local verification commands |",
-    ]
-    (PARENT / "V2_REPORT.md").write_text("\n".join(lines) + "\n")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--epoch-step-s", type=int, default=300)
@@ -1197,9 +981,6 @@ def main() -> None:
     write_csv(OUT / "satellite_set_check.csv", sat_checks)
     inventory_rows = correction_message_inventory()
     write_csv(OUT / "correction_message_inventory.csv", inventory_rows)
-    write_csv(OUT / "api_surface_check.csv", api_surface_check(nav))
-    write_writeup(summary_rows, cross_rows, seed_rows, sat_checks, all_bias_usage, inventory_rows, all_results)
-    write_v2_report()
 
 
 if __name__ == "__main__":

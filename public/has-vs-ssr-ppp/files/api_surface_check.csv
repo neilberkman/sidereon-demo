@@ -1,2 +1,0 @@
-check,detail,status
-SsrCorrectedEphemeris public evaluation path,"TypeError: source must be Sp3, PreciseEphemerisSamples, PreciseEphemerisInterpolant, PreciseInterpolantArtifact, or BroadcastEphemeris",not_accepted_by_observable_states_at_j2000_s
