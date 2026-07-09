@@ -44,6 +44,7 @@ SP3_DIR = OUT / "sp3"
 BKG_HIGH_RATE_BASE = "https://igs.bkg.bund.de/root_ftp/IGS/highrate/2026/189"
 NAV_URL = "https://igs.bkg.bund.de/root_ftp/IGS/BRDC/2026/189/BRDC00WRD_S_20261890000_01D_MN.rnx.gz"
 ITRF_URL = "https://datacenter.iers.org/products/reference-systems/terrestrial/itrf/itrf2020/ITRF2020_GNSS.SSC.txt"
+CORRECTIONS_BASE = "https://sidereon.dev/has-vs-ssr-ppp/files/data/corrections"
 
 
 @dataclass(frozen=True)
@@ -168,12 +169,7 @@ def ensure_inputs() -> None:
     copy_or_download(PARENT / "data" / "raw" / NAV_URL.rsplit("/", 1)[1], NAV_URL, RAW / NAV_URL.rsplit("/", 1)[1])
     copy_or_download(PARENT / "ITRF2020_GNSS.SSC.txt", ITRF_URL, DATA / "ITRF2020_GNSS.SSC.txt")
     for name in ["HAS_SSRA00EUH0_20260708_1933.rtcm3", "IGS_SSRA03IGS0_20260708_1933.rtcm3"]:
-        source = PARENT / "data" / "corrections" / name
-        target = CORR / name
-        if not target.exists():
-            if not source.exists():
-                raise FileNotFoundError(f"missing correction fixture: {source}")
-            shutil.copyfile(source, target)
+        copy_or_download(PARENT / "data" / "corrections" / name, f"{CORRECTIONS_BASE}/{name}", CORR / name)
 
 
 def decimal_year(dt: datetime) -> float:
