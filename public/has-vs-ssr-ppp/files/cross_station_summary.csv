@@ -1,0 +1,4 @@
+final_10min_horizontal_median_m_median,final_10min_horizontal_median_m_success_count,final_3d_m_median,final_3d_m_success_count,final_horizontal_m_median,final_horizontal_m_success_count,reach_stay_under_0_3m_horizontal_s_median,reach_stay_under_0_3m_horizontal_s_success_count,reach_stay_under_0_5m_horizontal_s_median,reach_stay_under_0_5m_horizontal_s_success_count,source,station_count
+0.4893,3,0.8681,3,0.4660,3,never,0,2400.0000,1,broadcast,3
+0.2690,3,0.5921,3,0.2985,3,3000.0000,1,2100.0000,2,has,3
+0.1941,3,0.7606,3,0.1727,3,3300.0000,3,2400.0000,3,igs,3

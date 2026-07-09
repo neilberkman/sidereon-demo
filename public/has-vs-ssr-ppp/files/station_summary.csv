@@ -1,0 +1,10 @@
+final_10min_3d_median_m,final_10min_horizontal_median_m,final_3d_m,final_horizontal_m,final_vertical_m,reach_stay_under_0_3m_3d_s,reach_stay_under_0_3m_horizontal_s,reach_stay_under_0_5m_3d_s,reach_stay_under_0_5m_horizontal_s,source,station,tail_epochs_under_0_3m_3d,tail_epochs_under_0_3m_horizontal,tail_epochs_under_0_5m_3d,tail_epochs_under_0_5m_horizontal
+0.4551,0.3177,0.4348,0.3177,-0.2969,never,never,2400.0,2400.0,broadcast,DLF1,0,0,11,11
+0.2760,0.2690,0.3046,0.2985,0.0607,never,3000.0,2700.0,2400.0,has,DLF1,0,9,10,11
+0.2237,0.1527,0.2009,0.1378,-0.1461,3300.0,3300.0,2400.0,2400.0,igs,DLF1,8,8,11,11
+1.6588,0.6519,1.6278,0.4660,1.5597,never,never,never,never,broadcast,DYNG,0,0,0,0
+2.7974,0.3644,3.0406,0.2972,3.0260,never,never,never,never,has,DYNG,0,0,0,0
+1.4078,0.2448,1.4429,0.2221,1.4257,never,4500.0,never,3900.0,igs,DYNG,0,4,0,6
+0.8058,0.4893,0.8681,0.5210,-0.6943,never,never,never,never,broadcast,EBRE,0,0,0,0
+0.5285,0.2644,0.5921,0.3444,-0.4817,never,never,never,1800.0,has,EBRE,0,0,0,13
+0.7606,0.1941,0.7606,0.1727,-0.7407,never,2700.0,never,2400.0,igs,EBRE,0,10,0,11

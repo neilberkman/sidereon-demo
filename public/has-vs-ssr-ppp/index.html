@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>GPS+Galileo PPP replay: HAS vs IGS SSR corrections &middot; sidereon</title>
+<style>
+:root {
+  --ink: #05070d; --panel: #080d14; --line: rgba(53,224,216,0.18);
+  --line-soft: rgba(53,224,216,0.09); --cyan: #35e0d8; --cyan-dim: #1c8a85;
+  --text: #cfe9ec; --muted: #5c7a80;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ink); color: var(--text); font-family: var(--mono); font-size: 14px; line-height: 1.65; }
+.wrap { max-width: 900px; margin: 0 auto; padding: 40px 20px 80px; }
+.site { color: var(--muted); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 8px; }
+.site a { color: var(--cyan); text-decoration: none; }
+h1 { font-size: 21px; line-height: 1.4; color: #eafcfb; margin: 4px 0 6px; }
+h2 { font-size: 15px; color: var(--cyan); letter-spacing: 0.08em; text-transform: uppercase; margin: 36px 0 10px; border-bottom: 1px solid var(--line-soft); padding-bottom: 6px; }
+p, li { color: var(--text); }
+a { color: var(--cyan); }
+code { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 3px; padding: 1px 5px; font-size: 13px; }
+pre { background: var(--panel); border: 1px solid var(--line-soft); border-radius: 4px; padding: 12px; overflow-x: auto; }
+.tablewrap { overflow-x: auto; margin: 14px 0; }
+table { border-collapse: collapse; font-size: 13px; min-width: 100%; }
+th, td { border: 1px solid var(--line-soft); padding: 6px 10px; text-align: left; white-space: nowrap; }
+th { color: var(--cyan-dim); background: var(--panel); font-weight: 600; }
+td { color: var(--text); }
+tr:nth-child(even) td { background: rgba(8,13,20,0.5); }
+.meta { color: var(--muted); font-size: 12.5px; margin-bottom: 28px; }
+.downloads { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px 20px; margin-top: 44px; }
+.downloads h2 { margin-top: 0; border: none; }
+.downloads ul { margin: 8px 0 0; padding-left: 18px; }
+.foot { margin-top: 40px; color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line-soft); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="site"><a href="/">sidereon</a> / analyses</div>
+  <h1 id="gpsgalileo-ppp-replay-with-orbitclock-corrections-and-partial-reachable-code-bias-application">GPS+Galileo PPP replay with orbit/clock corrections and partial reachable code-bias application</h1>
+<h2 id="scope">Scope</h2>
+<p>Stations: DLF1, DYNG, and EBRE from the IGS/EUREF high-rate archive. Observation epochs are identical for broadcast, HAS-corrected, and IGS-corrected PPP. Constellations: GPS and Galileo only.</p>
+<p>This is not an LG290P chipset result. This is a controlled RINEX replay through one sidereon 0.24.0 batch PPP path.</p>
+<p>Correction inputs: committed HAS_SSRA00EUH0 and IGS_SSRA03IGS0 RTCM captures from 2026-07-08. CNES was not included in this fixture, so the IGS combined stream is the SSR reference stream here.</p>
+<h2 id="initialization">Initialization</h2>
+<p>ITRF2020 station coordinates are used only after each solve for scoring. PPP initialization starts from a truth-independent seed. Seed procedure: broadcast SPP from the same first-epoch observations, using the RINEX approximate position as the nonlinear initial guess and as fallback only after SPP failure.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>station</th>
+<th>seed source</th>
+<th style="text-align: right;">seed horizontal error (m)</th>
+<th style="text-align: right;">seed 3D error (m)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DLF1</td>
+<td>broadcast_spp</td>
+<td style="text-align: right;">2.7873</td>
+<td style="text-align: right;">6.6354</td>
+</tr>
+<tr>
+<td>DYNG</td>
+<td>broadcast_spp</td>
+<td style="text-align: right;">2.5504</td>
+<td style="text-align: right;">5.3544</td>
+</tr>
+<tr>
+<td>EBRE</td>
+<td>broadcast_spp</td>
+<td style="text-align: right;">1.4263</td>
+<td style="text-align: right;">5.9418</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="correction-components">Correction Components</h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>component</th>
+<th>broadcast</th>
+<th>HAS</th>
+<th>IGS combined</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>orbit</td>
+<td>broadcast NAV</td>
+<td>RTCM SSR/HAS when available, broadcast fallback otherwise</td>
+<td>RTCM SSR when available, broadcast fallback otherwise</td>
+</tr>
+<tr>
+<td>clock</td>
+<td>broadcast NAV</td>
+<td>RTCM SSR/HAS when available, broadcast fallback otherwise</td>
+<td>RTCM SSR when available, broadcast fallback otherwise</td>
+</tr>
+<tr>
+<td>high-rate clock</td>
+<td>none</td>
+<td>applied when present in combined orbit/clock message</td>
+<td>applied when present in combined orbit/clock message</td>
+</tr>
+<tr>
+<td>code bias</td>
+<td>none</td>
+<td>applied only where sidereon exposes the selected signal bias</td>
+<td>applied only where sidereon exposes the selected signal bias</td>
+</tr>
+<tr>
+<td>phase bias</td>
+<td>none</td>
+<td>not applied</td>
+<td>not applied</td>
+</tr>
+<tr>
+<td>ionosphere</td>
+<td>dual-frequency IF combination</td>
+<td>dual-frequency IF combination</td>
+<td>dual-frequency IF combination</td>
+</tr>
+<tr>
+<td>troposphere</td>
+<td>estimated ZTD</td>
+<td>estimated ZTD</td>
+<td>estimated ZTD</td>
+</tr>
+<tr>
+<td>antenna phase center</td>
+<td>not applied</td>
+<td>not applied</td>
+<td>not applied</td>
+</tr>
+</tbody>
+</table></div>
+<p>Correction message inventory: HAS 1019=4289, 1046=4853, 1059=540, 1060=540, 1242=540, 1243=540; IGS 1059=540, 1060=1078, 1065=540, 1066=540, 1242=540, 1243=540, 1260=540, 1261=539, 1300=360, 1302=360.</p>
+<p>Applied selected code-bias terms: HAS 646 of 1758; IGS 625 of 1758. Biases are applied only from SSR messages received at or before the observation epoch. The selected GPS/Galileo RINEX signal pairs do not have complete exposed bias coverage in either stream, so this artifact is not a complete HAS service versus SSR service comparison.</p>
+<h2 id="residual-diagnostics">Residual Diagnostics</h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>source</th>
+<th style="text-align: right;">solved rows</th>
+<th style="text-align: right;">median code RMS (m)</th>
+<th style="text-align: right;">median final code RMS (m)</th>
+<th style="text-align: right;">median phase RMS (m)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>broadcast</td>
+<td style="text-align: right;">51</td>
+<td style="text-align: right;">2.3393</td>
+<td style="text-align: right;">2.4056</td>
+<td style="text-align: right;">0.0828</td>
+</tr>
+<tr>
+<td>has</td>
+<td style="text-align: right;">51</td>
+<td style="text-align: right;">6.5965</td>
+<td style="text-align: right;">6.7029</td>
+<td style="text-align: right;">0.1898</td>
+</tr>
+<tr>
+<td>igs</td>
+<td style="text-align: right;">51</td>
+<td style="text-align: right;">3.4083</td>
+<td style="text-align: right;">3.1203</td>
+<td style="text-align: right;">0.1446</td>
+</tr>
+</tbody>
+</table></div>
+<p>The residuals are solution diagnostics for this partial-bias, orbit/clock replay. They are not service-accuracy measurements.</p>
+<h2 id="cross-station-summary">Cross-Station Summary</h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>source</th>
+<th style="text-align: right;">stations</th>
+<th style="text-align: right;">median final horizontal (m)</th>
+<th style="text-align: right;">median final 3D (m)</th>
+<th style="text-align: right;">median final 10 min horizontal (m)</th>
+<th style="text-align: right;">0.5 m horizontal successes</th>
+<th style="text-align: right;">0.3 m horizontal successes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>broadcast</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0.4660</td>
+<td style="text-align: right;">0.8681</td>
+<td style="text-align: right;">0.4893</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td>has</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0.2985</td>
+<td style="text-align: right;">0.5921</td>
+<td style="text-align: right;">0.2690</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td>igs</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0.1727</td>
+<td style="text-align: right;">0.7606</td>
+<td style="text-align: right;">0.1941</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="per-station-results">Per-Station Results</h2>
+<p>Threshold entries use sustained stay-below logic: the reported prefix and every later solved prefix must be at or below the threshold, with at least 3 solved prefixes in that tail. Endpoint-only threshold hits are not counted.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>station</th>
+<th>source</th>
+<th style="text-align: right;">stay &lt;=0.5 m horiz (s)</th>
+<th style="text-align: right;">stay &lt;=0.3 m horiz (s)</th>
+<th style="text-align: right;">stay &lt;=0.5 m 3D (s)</th>
+<th style="text-align: right;">stay &lt;=0.3 m 3D (s)</th>
+<th style="text-align: right;">final horiz (m)</th>
+<th style="text-align: right;">final 3D (m)</th>
+<th style="text-align: right;">final 10 min horiz median (m)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DLF1</td>
+<td>broadcast</td>
+<td style="text-align: right;">2400.0</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">2400.0</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.3177</td>
+<td style="text-align: right;">0.4348</td>
+<td style="text-align: right;">0.3177</td>
+</tr>
+<tr>
+<td>DLF1</td>
+<td>has</td>
+<td style="text-align: right;">2400.0</td>
+<td style="text-align: right;">3000.0</td>
+<td style="text-align: right;">2700.0</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.2985</td>
+<td style="text-align: right;">0.3046</td>
+<td style="text-align: right;">0.2690</td>
+</tr>
+<tr>
+<td>DLF1</td>
+<td>igs</td>
+<td style="text-align: right;">2400.0</td>
+<td style="text-align: right;">3300.0</td>
+<td style="text-align: right;">2400.0</td>
+<td style="text-align: right;">3300.0</td>
+<td style="text-align: right;">0.1378</td>
+<td style="text-align: right;">0.2009</td>
+<td style="text-align: right;">0.1527</td>
+</tr>
+<tr>
+<td>DYNG</td>
+<td>broadcast</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.4660</td>
+<td style="text-align: right;">1.6278</td>
+<td style="text-align: right;">0.6519</td>
+</tr>
+<tr>
+<td>DYNG</td>
+<td>has</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.2972</td>
+<td style="text-align: right;">3.0406</td>
+<td style="text-align: right;">0.3644</td>
+</tr>
+<tr>
+<td>DYNG</td>
+<td>igs</td>
+<td style="text-align: right;">3900.0</td>
+<td style="text-align: right;">4500.0</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.2221</td>
+<td style="text-align: right;">1.4429</td>
+<td style="text-align: right;">0.2448</td>
+</tr>
+<tr>
+<td>EBRE</td>
+<td>broadcast</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.5210</td>
+<td style="text-align: right;">0.8681</td>
+<td style="text-align: right;">0.4893</td>
+</tr>
+<tr>
+<td>EBRE</td>
+<td>has</td>
+<td style="text-align: right;">1800.0</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.3444</td>
+<td style="text-align: right;">0.5921</td>
+<td style="text-align: right;">0.2644</td>
+</tr>
+<tr>
+<td>EBRE</td>
+<td>igs</td>
+<td style="text-align: right;">2400.0</td>
+<td style="text-align: right;">2700.0</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">never</td>
+<td style="text-align: right;">0.1727</td>
+<td style="text-align: right;">0.7606</td>
+<td style="text-align: right;">0.1941</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="satellite-set-check">Satellite Set Check</h2>
+<p>Result in <code>output/satellite_set_check.csv</code>: identical GPS+Galileo used satellites across broadcast, HAS, and IGS for every solved station prefix: True. GLONASS, BeiDou, and other systems are not processed.</p>
+<h2 id="limitations">Limitations</h2>
+<ul>
+<li>Single-day window: 2026-07-08 19:33:00 GPST to 2026-07-08 21:03:00 GPST.</li>
+<li>GPS plus Galileo only: excluded systems are GLONASS, BeiDou, QZSS, SBAS, and NavIC.</li>
+<li>Code-bias handling is partial: applied code-bias terms are limited to selected-signal biases reachable through sidereon 0.24.0's public <code>SsrCorrectionStore.code_bias(sat, signal)</code> API. Missing selected-signal biases remain unadjusted and are counted in <code>output/code_bias_usage.csv</code>.</li>
+<li>Orbit and clock correction availability varies by stream. Broadcast fallback appears in the materialized SP3 files for missing corrected satellite states, with counts in <code>output/correction_coverage.csv</code>.</li>
+<li>CNES was not included in this fixture.</li>
+<li>SP3 materialization uses explicit SSR orbit/clock application. <code>output/api_surface_check.csv</code> contains the sidereon 0.24.0 public-surface check: <code>SsrCorrectedEphemeris</code> is not accepted by <code>observable_states_at_j2000_s</code> for PPP-ready SP3 sampling.</li>
+</ul>
+<h2 id="outputs">Outputs</h2>
+<ul>
+<li><code>output/convergence_all.csv</code>: per-prefix horizontal and 3D error time series.</li>
+<li><code>output/station_summary.csv</code>: threshold and final-accuracy table per station and source.</li>
+<li><code>output/cross_station_summary.csv</code>: cross-station medians and threshold success counts.</li>
+<li><code>output/code_bias_usage.csv</code>: selected, applied, and missing code-bias term counts.</li>
+<li><code>output/correction_coverage.csv</code>: corrected versus broadcast-fallback orbit/clock states.</li>
+<li><code>output/satellite_set_check.csv</code>: same-satellite verification across the three runs.</li>
+</ul>
+
+  <div class="downloads">
+    <h2>Reproduce this</h2>
+    <p>One script, one public package. The correction captures and station RINEX resolve from committed fixtures and public archives.</p>
+    <pre>pip install sidereon==0.24.0
+python run_ppp_comparison_v2.py</pre>
+    <ul>
+      <li><a href="files/run_ppp_comparison_v2.py">run_ppp_comparison_v2.py</a> (the full pipeline)</li>
+      <li><a href="files/convergence_all.csv">convergence_all.csv</a> &middot; <a href="files/station_summary.csv">station_summary.csv</a> &middot; <a href="files/cross_station_summary.csv">cross_station_summary.csv</a></li>
+      <li><a href="files/code_bias_usage.csv">code_bias_usage.csv</a> &middot; <a href="files/correction_coverage.csv">correction_coverage.csv</a> &middot; <a href="files/satellite_set_check.csv">satellite_set_check.csv</a></li>
+    </ul>
+  </div>
+  <div class="foot">
+    Computed with <a href="https://github.com/neilberkman/sidereon">sidereon</a> 0.24.0
+    (MIT, Rust core with Python/C/WASM/Elixir interfaces) &middot;
+    <a href="/">live in-browser demo</a> &middot;
+    <a href="/track-cleanup">phone-track cleanup example</a> &middot;
+    <a href="/static-occupation">CORS static occupation example</a>
+  </div>
+</div>
+</body>
+</html>
