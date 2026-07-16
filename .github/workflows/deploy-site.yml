@@ -1,0 +1,102 @@
+name: deploy-site
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "public/data/*.tle"
+      - "public/data/tle-refresh.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Check
+        run: |
+          npm run typecheck
+          npm test
+      - name: Build
+        run: npm run build
+      - name: Upload to BunnyCDN and purge
+        env:
+          BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import mimetypes
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          api_key = os.environ["BUNNY_API_KEY"]
+          zone = json.load(urlopen(Request(
+              "https://api.bunny.net/storagezone/1616378",
+              headers={"AccessKey": api_key, "Accept": "application/json"},
+          )))
+          password = zone["Password"]
+          zone_name = zone["Name"]
+
+          files = sorted(path for path in Path("dist").rglob("*") if path.is_file())
+          if not files:
+              raise RuntimeError("production build is empty")
+
+          for path in files:
+              relative = path.relative_to("dist").as_posix()
+              content_type = mimetypes.guess_type(relative)[0] or "application/octet-stream"
+              data = path.read_bytes()
+              request = Request(
+                  f"https://ny.storage.bunnycdn.com/{zone_name}/{quote(relative, safe='/')}",
+                  data=data,
+                  method="PUT",
+                  headers={
+                      "AccessKey": password,
+                      "Content-Type": content_type,
+                  },
+              )
+              with urlopen(request, timeout=120) as response:
+                  if response.status not in (200, 201):
+                      raise RuntimeError(f"upload failed for {relative}: HTTP {response.status}")
+              print(f"uploaded {relative} ({len(data)} bytes)")
+
+          urlopen(Request(
+              "https://api.bunny.net/pullzone/6071487/purgeCache",
+              data=b"",
+              method="POST",
+              headers={"AccessKey": api_key, "Content-Length": "0"},
+          ), timeout=120).read()
+          print(f"purged CDN after uploading {len(files)} files")
+          PY
+      - name: Verify live entry point
+        run: |
+          expected=$(sha256sum dist/index.html | cut -d' ' -f1)
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --show-error \
+              "https://sidereon.dev/?deploy=${GITHUB_SHA}-${attempt}" \
+              -o /tmp/live-index.html
+            actual=$(sha256sum /tmp/live-index.html | cut -d' ' -f1)
+            if [ "$actual" = "$expected" ]; then
+              echo "live index verified: $actual"
+              exit 0
+            fi
+            echo "attempt $attempt: waiting for CDN propagation"
+            sleep 5
+          done
+          echo "live index does not match the deployed build" >&2
+          exit 1

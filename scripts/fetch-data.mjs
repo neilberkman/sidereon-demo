@@ -71,14 +71,14 @@ for (const y of years) {
   if (ionexOk) break;
 
   try {
-    const index = await getText(`http://ftp.aiub.unibe.ch/CODE/${y}/`);
+    const index = await getText(`https://ftp.aiub.unibe.ch/CODE/${y}/`);
     const names = Array.from(index.matchAll(/href="(COD0OPS[A-Z]+_\d{11}_01D_01H_GIM\.INX\.gz)"/g), (m) => m[1])
       .sort()
       .reverse();
 
     for (const name of names) {
       try {
-        const txt = await getGz(`http://ftp.aiub.unibe.ch/CODE/${y}/${name}`);
+        const txt = await getGz(`https://ftp.aiub.unibe.ch/CODE/${y}/${name}`);
         if (!txt.includes("LAT/LON1/LON2")) throw new Error("not an IONEX grid");
         writeFileSync(join(DATA, "global.ionex"), txt);
         manifest.ionex = name.replace(/\.INX\.gz$/, "");

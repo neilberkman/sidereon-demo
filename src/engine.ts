@@ -27,6 +27,8 @@ import init, {
   type Ionex,
   type BroadcastEphemeris,
   type RinexObs,
+  type RtkArcEpoch,
+  type SppRequest,
   type Sp3,
 } from "@neilberkman/sidereon";
 import type { Constellation } from "./colors";
@@ -700,12 +702,19 @@ export function solveSpp(
     coarse.positionM[2],
     coarse.rxClockS * C_M_S,
   ];
-  const request: Record<string, unknown> = {
+  const request: SppRequest = {
     ...base,
     corrections,
     initialGuess: seed,
+    ...(corrections.ionosphere
+      ? {
+          klobuchar: {
+            alpha: vec4From(data.klobuchar.alpha),
+            beta: vec4From(data.klobuchar.beta),
+          },
+        }
+      : {}),
   };
-  if (corrections.ionosphere) request.klobuchar = data.klobuchar;
 
   const t1 = performance.now();
   const sol = data.nav.solveBroadcast(request);
@@ -828,6 +837,11 @@ function vec3From(values: ArrayLike<number>): [number, number, number] {
   return [values[0], values[1], values[2]];
 }
 
+function vec4From(values: ArrayLike<number>): [number, number, number, number] {
+  if (values.length !== 4) throw new Error(`expected four coefficients, got ${values.length}`);
+  return [values[0], values[1], values[2], values[3]];
+}
+
 function subVec3(a: ArrayLike<number>, b: ArrayLike<number>): [number, number, number] {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
@@ -864,7 +878,7 @@ function stationName(obs: RinexObs, fallback: string): string {
 
 function solveSequentialArc(
   singleArc: {
-    epochs: unknown[];
+    epochs: RtkArcEpoch[];
     wavelengthsM: Record<string, number>;
     offsetsM: Record<string, number>;
   },
@@ -877,11 +891,21 @@ function solveSequentialArc(
     ambiguityPriorSigmaM: 1000.0,
     wavelengthsM: singleArc.wavelengthsM,
     offsetsM: singleArc.offsetsM,
-  }) as { epochs: { reportedBaselineM: number[] }[] };
-  return seq.epochs.map((epoch, epochIndex) => ({
-    epochIndex,
-    baselineM: vec3From(epoch.reportedBaselineM),
-  }));
+  });
+  return seq.epochs.map((epoch, epochIndex) => {
+    const reportedBaselineM = epoch.reportedBaselineM;
+    if (
+      !Array.isArray(reportedBaselineM)
+      || reportedBaselineM.length !== 3
+      || !reportedBaselineM.every((value) => typeof value === "number")
+    ) {
+      throw new Error(`RTK epoch ${epochIndex} returned an invalid reported baseline`);
+    }
+    return {
+      epochIndex,
+      baselineM: vec3From(reportedBaselineM),
+    };
+  });
 }
 
 export function solveRtkDemo(assets: RtkAssetBundle): RtkDemoResult {
@@ -894,11 +918,7 @@ export function solveRtkDemo(assets: RtkAssetBundle): RtkDemoResult {
   const truthBaselineM = subVec3(roverArpM, baseArpM);
 
   const buildStart = performance.now();
-  const singleArc = buildRinexRtkArc(sp3, baseObs, roverObs, RTK_ARC_OPTIONS) as {
-    epochs: unknown[];
-    wavelengthsM: Record<string, number>;
-    offsetsM: Record<string, number>;
-  };
+  const singleArc = buildRinexRtkArc(sp3, baseObs, roverObs, RTK_ARC_OPTIONS);
   buildDualFrequencyRinexRtkArc(sp3, baseObs, roverObs, RTK_ARC_OPTIONS);
   const convergence = solveSequentialArc(singleArc, baseArpM);
   const buildMs = performance.now() - buildStart;
