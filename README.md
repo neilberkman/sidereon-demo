@@ -73,7 +73,8 @@ epoch in `data-manifest.json` so the constellation panel can show its age.
 
 ## Build and run
 
-Requires Node 18+ and the published `@neilberkman/sidereon` WASM package.
+Requires Node `^20.19.0 || >=22.12.0` and the published
+`@neilberkman/sidereon` WASM package.
 
 ```
 npm install
