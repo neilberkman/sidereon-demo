@@ -20,7 +20,7 @@
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/ibm-plex-sans-condensed": "^5.2.8",
-    "@neilberkman/sidereon": "^0.31.2",
+    "@neilberkman/sidereon": "^0.32.0",
     "comlink": "^4.4.2",
     "three": "^0.169.0"
   },
