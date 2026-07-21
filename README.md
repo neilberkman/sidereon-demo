@@ -15,7 +15,7 @@ serious GNSS library has existed before.
 | --- | --- | --- |
 | Rust | `cargo add sidereon` | crates.io/crates/sidereon |
 | Python | `pip install sidereon` | pypi.org/project/sidereon |
-| Elixir | `{:sidereon, "~> 0.33"}` in `mix.exs` | hex.pm/packages/sidereon |
+| Elixir | `{:sidereon, "~> 0.34"}` in `mix.exs` | hex.pm/packages/sidereon |
 | JavaScript / WASM | `npm i @neilberkman/sidereon` | npmjs.com/package/@neilberkman/sidereon |
 | C | link `libsidereon` + the cbindgen header | github.com/neilberkman/sidereon |
 
