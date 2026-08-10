@@ -1,5 +1,5 @@
 {
-  "fetchedAt": "2026-08-04T16:37:02.164Z",
+  "fetchedAt": "2026-08-10T17:09:36.997Z",
   "refreshed": [],
   "kept": [
     "gps-ops.tle",
@@ -8,5 +8,5 @@
     "beidou.tle",
     "global.ionex"
   ],
-  "tleEpoch": "2026-07-23T10:40:04.223Z"
+  "tleEpoch": "2026-08-02T16:57:21.968Z"
 }
