@@ -1,12 +1,13 @@
 {
-  "fetchedAt": "2026-08-22T17:53:14.490Z",
-  "refreshed": [],
-  "kept": [
+  "fetchedAt": "2026-08-24T18:31:14.179Z",
+  "refreshed": [
     "gps-ops.tle",
     "galileo.tle",
     "glo-ops.tle",
-    "beidou.tle",
+    "beidou.tle"
+  ],
+  "kept": [
     "global.ionex"
   ],
-  "tleEpoch": "2026-08-20T20:44:26.003Z"
+  "tleEpoch": "2026-08-24T08:26:22.502Z"
 }
