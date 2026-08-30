@@ -1,6 +1,6 @@
 // SIDEREON marketing site. The page is about the engine and its polyglot reach:
 // one reference-validated Rust GNSS + astrodynamics core, reachable from Rust,
-// Python, C, Elixir, and WebAssembly. The live globe is the featured spectacle
+// Python, C, Go, Elixir, and WebAssembly. The live globe is the featured spectacle
 // that pulls a visitor in; the in-browser solver is one showcase section proving
 // the WASM interface runs the whole engine client-side. Every number in the live
 // section comes from the WASM engine running in the tab.
