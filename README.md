@@ -24,9 +24,9 @@ Primary repo: https://github.com/neilberkman/sidereon
 ## Page structure
 
 1. **Hero** — the featured live constellation globe behind the message: one engine,
-   five languages, with a compact install switcher and the GitHub call to action.
+   six languages, with a compact install switcher and the GitHub call to action.
 2. **Language interfaces** — the same capability (propagate a TLE, or load an SP3
-   and run an SPP solve) as real code in Rust / Python / C / Elixir / JavaScript,
+   and run an SPP solve) as real code in Rust / Python / C / Go / Elixir / JavaScript,
    tabbed by language and capability, each with its install line and registry link.
 3. **Capabilities** — the engine's breadth: SPP, RTK, PPP, SGP4, frames and time
    (IAU), IONEX, RINEX, conjunction screening (CDM/OMM), ANTEX, DOP, RF link budget.
