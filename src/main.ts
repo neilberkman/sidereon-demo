@@ -221,14 +221,27 @@ function timeAgo(from: Date): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+// Where the served element sets came from. The refresh job records a source
+// per group: CelesTrak normally; Space-Track (18 SDS) when CelesTrak refused
+// the fetch, in which case the citation has to say so.
+let tleSourceLabel = "celestrak";
+
+function describeTleSources(sources: Record<string, string> | undefined): string {
+  const values = Object.values(sources ?? {});
+  if (!values.includes("space-track")) return "celestrak";
+  return values.every((v) => v === "space-track") ? "space-track.org (18 SDS)" : "celestrak + space-track.org (18 SDS)";
+}
+
 async function loadTleRefreshManifest(): Promise<void> {
   try {
     const r = await okFetch("/data/tle-refresh.json");
-    const data = (await r.json()) as { refreshedAt?: string };
+    const data = (await r.json()) as { refreshedAt?: string; sources?: Record<string, string> };
     const t = data.refreshedAt ? new Date(data.refreshedAt) : null;
     if (t && Number.isFinite(t.getTime())) tleRefreshedAt = t;
+    tleSourceLabel = describeTleSources(data.sources);
   } catch {
     tleRefreshedAt = null;
+    tleSourceLabel = "celestrak";
   }
 }
 
@@ -281,13 +294,13 @@ function updateTleFreshnessFoot(sources: LoadedTleSource[]): void {
   const foot = $("legend-foot");
   const epoch = primaryTleEpoch(sources);
   if (!epoch) {
-    foot.textContent = "TLE · CELESTRAK · EPOCH UNKNOWN";
+    foot.textContent = `TLE · ${tleSourceLabel.toUpperCase()} · EPOCH UNKNOWN`;
     foot.classList.add("stale");
     return;
   }
   const ageDays = Math.max(0, Math.floor((Date.now() - epoch.getTime()) / 86400000));
   const refreshed = tleRefreshedAt ? `REFRESHED ${timeAgo(tleRefreshedAt).toUpperCase()}` : "DAILY REFRESH";
-  foot.textContent = `TLE · CELESTRAK · ${refreshed} · EPOCH ${epoch.toISOString().slice(0, 10)}`;
+  foot.textContent = `TLE · ${tleSourceLabel.toUpperCase()} · ${refreshed} · EPOCH ${epoch.toISOString().slice(0, 10)}`;
   foot.classList.toggle("stale", ageDays >= 3);
 }
 
@@ -360,7 +373,7 @@ async function boot() {
   await sleep(80);
 
   await loadTleRefreshManifest();
-  line('<span class="ok">›</span> fetching real element sets · celestrak');
+  line(`<span class="ok">›</span> fetching real element sets · ${tleSourceLabel}`);
   const loadedTles: LoadedTleSource[] = [];
   for (const entry of CELESTRAK_GROUPS) {
     const src = await loadTleSource(entry);
@@ -368,7 +381,9 @@ async function boot() {
     tleSources.push({ text: src.text, constellation: src.constellation });
     const parsed = parseTleFile(src.text, src.constellation);
     sats = sats.concat(parsed);
-    const note = tleRefreshedAt ? `celestrak · refreshed ${timeAgo(tleRefreshedAt)}` : "celestrak · daily refresh";
+    const note = tleRefreshedAt
+      ? `${tleSourceLabel} · refreshed ${timeAgo(tleRefreshedAt)}`
+      : `${tleSourceLabel} · daily refresh`;
     line(
       `  ${src.constellation.padEnd(3)} · <span class="em">${parsed.length}</span> satellites · ${note}`,
     );
