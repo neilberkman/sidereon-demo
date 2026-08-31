@@ -59,9 +59,13 @@ delay; it is a standalone exhibit and is not fed into the SPP solve.
 ## Bundled real data
 
 All inputs live in `public/data/` and are the exact bytes the engine consumes.
-`scripts/fetch-data.mjs` refreshes the TLEs and the global IONEX at build time
-(one provider fetch per build, runtime stays zero-network), and records the TLE
-epoch in `data-manifest.json` so the constellation panel can show its age.
+The scheduled `refresh-tle` workflow (twice daily) is the only thing that talks
+to the providers: CelesTrak group files, with a per-group Space-Track (18 SDS)
+fallback that keeps the CelesTrak name lines, a 2-hour guard so no group is
+fetched more often than CelesTrak updates it, and a stop on 403/404. Builds and
+visitors never fetch; they use the committed files and `tle-refresh.json`
+(refresh time and source per group). `npm run fetch-data` is a manual local
+refresh under the same 2-hour guard.
 
 | File | What it is |
 | --- | --- |

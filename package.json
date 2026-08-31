@@ -9,7 +9,6 @@
   "scripts": {
     "fetch-data": "node scripts/fetch-data.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/fetch-data.mjs",
     "build": "vite build",
     "preview": "vite preview --port 4173",
     "typecheck": "tsc -p tsconfig.json --noEmit",
