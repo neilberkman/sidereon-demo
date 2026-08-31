@@ -1,7 +1,11 @@
 name: refresh-tle
 on:
   schedule:
+    # Two passes a day: a CelesTrak outage at the first slot costs hours of
+    # staleness instead of a full day. Still well under their per-group cadence
+    # guidance.
     - cron: "17 5 * * *"
+    - cron: "17 17 * * *"
   workflow_dispatch:
 
 permissions:
@@ -11,24 +15,42 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Fetch element sets from CelesTrak (one polite pass per day)
+      - uses: actions/checkout@v5
+      - name: Fetch element sets from CelesTrak (one polite pass per run)
+        id: fetch
         run: |
           set -euo pipefail
-          declare -A groups=( [gps-ops]=gps-ops [galileo]=galileo [glo-ops]=glo-ops [beidou]=beidou )
-          for file in "${!groups[@]}"; do
-            group="${groups[$file]}"
-            out="public/data/${file}.tle"
-            curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 20 --fail --silent --show-error \
-              --max-time 60 -A "sidereon.dev daily refresh (github action)" \
-              "https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle" -o "${out}.new"
-            # sanity: at least 3 records (3 lines each), first line looks like a TLE name/line
-            lines=$(wc -l < "${out}.new")
-            if [ "$lines" -lt 9 ]; then echo "${file}: too few lines ($lines), keeping previous"; rm "${out}.new"; continue; fi
-            mv "${out}.new" "${out}"
+          refreshed=()
+          failed=()
+          for group in gps-ops galileo glo-ops beidou; do
+            out="public/data/${group}.tle"
+            # A failed group keeps its previous file and the loop moves on; one
+            # upstream timeout must not leave every other constellation stale.
+            if curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 20 --fail --silent --show-error \
+                 --connect-timeout 30 --max-time 120 -A "sidereon.dev daily refresh (github action)" \
+                 "https://celestrak.org/NORAD/elements/gp.php?GROUP=${group}&FORMAT=tle" -o "${out}.new"; then
+              # sanity: at least 3 records (3 lines each)
+              lines=$(wc -l < "${out}.new")
+              if [ "$lines" -lt 9 ]; then
+                echo "${group}: too few lines ($lines), keeping previous"
+                rm -f "${out}.new"; failed+=("$group")
+              else
+                mv "${out}.new" "${out}"; refreshed+=("$group")
+              fi
+            else
+              echo "${group}: fetch failed, keeping previous"
+              rm -f "${out}.new"; failed+=("$group")
+            fi
             sleep 15
           done
-          printf '{"refreshedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > public/data/tle-refresh.json
+          # refreshedAt describes the oldest file the site serves, so it only
+          # advances when every group refreshed in this run.
+          if [ "${#failed[@]}" -eq 0 ]; then
+            printf '{"refreshedAt":"%s"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > public/data/tle-refresh.json
+          fi
+          echo "refreshed: ${refreshed[*]:-none}"
+          echo "failed: ${failed[*]:-none}"
+          echo "failed=${failed[*]:-}" >> "$GITHUB_OUTPUT"
       - name: Commit if changed
         run: |
           git config user.name "tle-refresh"
@@ -55,3 +77,8 @@ jobs:
           urllib.request.urlopen(urllib.request.Request("https://api.bunny.net/pullzone/6071487/purgeCache",method="POST",headers={"AccessKey":k,"Content-Length":"0"}))
           print("purge OK")
           PY
+      - name: Fail the run if any group kept stale data
+        if: always() && steps.fetch.outputs.failed != ''
+        run: |
+          echo "::error::element sets kept stale for: ${{ steps.fetch.outputs.failed }}"
+          exit 1

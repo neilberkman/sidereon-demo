@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - "public/data/*.tle"
       - "public/data/tle-refresh.json"
+      - ".github/workflows/refresh-tle.yml"
   workflow_dispatch:
 
 permissions:
