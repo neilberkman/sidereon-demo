@@ -48,8 +48,12 @@ jobs:
           urllib.request.urlopen(urllib.request.Request("https://api.bunny.net/pullzone/6071487/purgeCache",method="POST",headers={"AccessKey":k,"Content-Length":"0"}))
           print("purge OK")
           PY
-      - name: Fail the run if any group kept stale data
-        if: always() && steps.fetch.outputs.failed != ''
+      # A fetch failure alone is not worth failing on: CelesTrak refuses shared
+      # CI egress ranges and has its own outages, and the previous element sets
+      # stay in place. The run fails once those sets are actually too old to
+      # serve, which is the condition a human needs to act on.
+      - name: Fail the run if the served element sets are stale
+        if: always() && steps.fetch.outputs.alarm == 'true'
         run: |
-          echo "::error::element sets kept stale for: ${{ steps.fetch.outputs.failed }}"
+          echo "::error::element sets are ${{ steps.fetch.outputs.stale_hours }}h old; could not refresh: ${{ steps.fetch.outputs.failed }}"
           exit 1

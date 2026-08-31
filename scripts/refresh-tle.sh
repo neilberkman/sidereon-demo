@@ -26,6 +26,7 @@
 #   REFRESH_PAUSE_S       pause between CelesTrak groups (default 15)
 #   REFRESH_RETRY_DELAY_S curl retry delay (default 20)
 #   REFRESH_MIN_AGE_S     guard window (default 7200)
+#   REFRESH_MAX_STALE_H   hours of staleness that fails the run (default 30)
 #   GITHUB_OUTPUT         when set, "failed=<groups>" is appended to it
 set -euo pipefail
 
@@ -38,6 +39,7 @@ TLE_GROUPS=(gps-ops galileo glo-ops beidou)
 PAUSE=${REFRESH_PAUSE_S:-15}
 RETRY_DELAY=${REFRESH_RETRY_DELAY_S:-20}
 MIN_AGE=${REFRESH_MIN_AGE_S:-7200}
+MAX_STALE_H=${REFRESH_MAX_STALE_H:-30}
 PROTO='=https'
 [ "${REFRESH_ALLOW_HTTP:-0}" = "1" ] && PROTO='=http,https'
 
@@ -215,6 +217,35 @@ PY
 
 echo "current: ${current[*]:-none}"
 echo "failed: ${failed[*]:-none}"
+
+# A failed pass is only worth waking a human when the data the site serves has
+# actually gone stale. CelesTrak refuses shared CI egress ranges and has its
+# own outages, so an isolated failure is expected and harmless while the last
+# good element sets are still fresh; a run that leaves them older than
+# MAX_STALE_H is the condition that matters.
+stale_hours=$(python3 - "$STATE" <<'AGE'
+import json, sys, datetime
+try:
+    stamp = json.load(open(sys.argv[1]))["refreshedAt"]
+    then = datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    print(f"{(datetime.datetime.now(datetime.timezone.utc) - then).total_seconds() / 3600:.1f}")
+except Exception:
+    print("")
+AGE
+)
+alarm=false
+if [ "${#failed[@]}" -ne 0 ]; then
+  if [ -z "$stale_hours" ] || [ "${stale_hours%.*}" -ge "$MAX_STALE_H" ]; then
+    alarm=true
+  fi
+fi
+echo "element sets are ${stale_hours:-unknown} hours old (alarm threshold ${MAX_STALE_H}h, alarm=${alarm})"
+
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
   echo "failed=${failed[*]:-}" >> "$GITHUB_OUTPUT"
+  echo "stale_hours=${stale_hours}" >> "$GITHUB_OUTPUT"
+  echo "alarm=${alarm}" >> "$GITHUB_OUTPUT"
+fi
+if [ "${#failed[@]}" -ne 0 ] && [ "$alarm" = false ]; then
+  echo "::warning::kept previous element sets for ${failed[*]}; served data is ${stale_hours}h old, under the ${MAX_STALE_H}h threshold"
 fi
