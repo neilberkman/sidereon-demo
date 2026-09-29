@@ -1,6 +1,7 @@
 name: deploy-site
 
 on:
+  pull_request:
   push:
     branches: [main]
     paths-ignore:
@@ -13,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-site
+  group: deploy-site-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
   cancel-in-progress: true
 
 jobs:
@@ -34,7 +35,11 @@ jobs:
           npm test
       - name: Build
         run: npm run build
+      - name: Check Go module discovery page
+        run: |
+          grep -Fq '<meta name="go-import" content="sidereon.dev/go/v3 git https://github.com/neilberkman/sidereon-go">' dist/go/v3/index.html
       - name: Upload to BunnyCDN and purge
+        if: github.event_name != 'pull_request'
         env:
           BUNNY_API_KEY: ${{ secrets.BUNNY_API_KEY }}
         run: |
@@ -85,6 +90,7 @@ jobs:
           print(f"purged CDN after uploading {len(files)} files")
           PY
       - name: Verify live entry point
+        if: github.event_name != 'pull_request'
         run: |
           expected=$(sha256sum dist/index.html | cut -d' ' -f1)
           for attempt in $(seq 1 12); do
@@ -100,4 +106,25 @@ jobs:
             sleep 5
           done
           echo "live index does not match the deployed build" >&2
+          exit 1
+      - name: Verify live Go module discovery
+        if: github.event_name != 'pull_request'
+        run: |
+          expected='<meta name="go-import" content="sidereon.dev/go/v3 git https://github.com/neilberkman/sidereon-go">'
+          grep -Fq "$expected" dist/go/v3/index.html
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error \
+              -D /tmp/live-go-import-headers.txt \
+              "https://sidereon.dev/go/v3?go-get=1&deploy=${GITHUB_SHA}-${attempt}" \
+              -o /tmp/live-go-import.html; then
+              if grep -Eiq '^content-type:[[:space:]]*text/html([;[:space:]]|$)' /tmp/live-go-import-headers.txt \
+                && grep -Fq "$expected" /tmp/live-go-import.html; then
+                echo "live Go module discovery metadata verified"
+                exit 0
+              fi
+            fi
+            echo "attempt $attempt: waiting for Go module route propagation"
+            sleep 5
+          done
+          echo "live Go module discovery metadata is missing or malformed" >&2
           exit 1
