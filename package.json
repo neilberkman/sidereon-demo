@@ -13,7 +13,7 @@
     "preview": "vite preview --port 4173",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "npm run typecheck",
-    "test": "rm -rf .tmp/test && tsc -p tsconfig.test.json && node --test .tmp/test/tests/*.js"
+    "test": "rm -rf .tmp/test && tsc -p tsconfig.test.json && node --test .tmp/test/tests/*.js tests/*.test.mjs"
   },
   "dependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",

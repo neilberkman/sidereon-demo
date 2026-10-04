@@ -775,7 +775,7 @@ export interface RtkDemoResult {
 }
 
 const RTK_ASSETS = {
-  sp3: "/data/rtk/GBM0MGXRAP_20201770000_01D_05M_ORB_6epoch.sp3",
+  sp3: "/data/rtk/GBM0MGXRAP_20201770000_01D_05M_ORB_24epoch.sp3",
   baseObs: "/data/rtk/WTZR00DEU_R_20201770000_01D_30S_MO_40epoch.rnx",
   roverObs: "/data/rtk/WTZZ00DEU_R_20201770000_01D_30S_MO_40epoch.rnx",
 };
