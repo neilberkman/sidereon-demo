@@ -477,6 +477,9 @@ export async function loadSppData(): Promise<SppData> {
 
   // Reception epoch, read from the bundled observation record (not hardcoded).
   const et = obs.epoch(0).epoch;
+  if (!et) {
+    throw new Error("ABMF observation file epoch 0 has no civil timestamp");
+  }
   const sec = Math.round(et.second);
   const epochUnixS = Date.UTC(et.year, et.month - 1, et.day, et.hour, et.minute, sec) / 1000;
   const tRxJ2000S = epochUnixS - J2000_UNIX_S;
