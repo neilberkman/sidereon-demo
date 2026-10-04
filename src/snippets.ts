@@ -481,8 +481,8 @@ print(solution.rx_clock_s)   # receiver clock bias, seconds`,
     tag: "h",
     install: "cc app.c -lsidereon",
     installNote: "github + cbindgen header",
-    registry: "https://github.com/neilberkman/sidereon",
-    registryLabel: "github.com/neilberkman/sidereon",
+    registry: "https://github.com/neilberkman/sidereon-c",
+    registryLabel: "github.com/neilberkman/sidereon-c",
     filename: "track.c",
     caps: {
       propagate: `#include "sidereon.h"
