@@ -30,9 +30,10 @@ const llh = () =>
   page.$$eval("#solve-llh .v", (els) => els.map((e) => e.textContent.trim()).join(" | "));
 const used = () =>
   page.$eval("#solve-used", (e) => e.textContent.trim()).catch(() => "");
-// metric -> { raw, active } from the RAW vs ACTIVE compare table
-const metrics = () =>
-  page.evaluate(() => {
+// metric -> { raw, active } from the inline comparison and the solve overlay's
+// DOP table. The inline panel deliberately keeps DOP in the detailed overlay.
+const metrics = async () => {
+  const out = await page.evaluate(() => {
     const out = {};
     document.querySelectorAll("#solve-compare .cmp-row:not(.cmp-head)").forEach((r) => {
       const k = r.querySelector(".k")?.textContent?.trim();
@@ -41,6 +42,25 @@ const metrics = () =>
     });
     return out;
   });
+  await page.click('.maximize[data-panel="solve"]');
+  await page.locator("#ov-solve-results").waitFor({ state: "visible" });
+  Object.assign(
+    out,
+    await page.evaluate(() => {
+      const dop = {};
+      document.querySelectorAll("#ov-solve-results .ov-table tbody tr").forEach((row) => {
+        const cells = [...row.querySelectorAll("td")].map((cell) => cell.textContent.trim());
+        if (cells[0]?.endsWith("DOP") && cells.length === 3) {
+          dop[cells[0]] = { raw: cells[1], active: cells[2] };
+        }
+      });
+      return dop;
+    }),
+  );
+  await page.keyboard.press("Escape");
+  await page.locator("#overlay").waitFor({ state: "hidden" });
+  return out;
+};
 const headline = () => page.$eval("#solve-headline", (e) => e.textContent.trim());
 
 const setCorr = async (key) => {
@@ -100,7 +120,7 @@ for (const deg of [0, 10, 20, 35, 45]) {
     deg,
     used: Number(m["SATS USED"].active),
     pdop: Number(m.PDOP.active),
-    hdopVdop: m["HDOP / VDOP"].active,
+    hdopVdop: `${m.HDOP.active} / ${m.VDOP.active}`,
     usedText: await used(),
   });
 }
