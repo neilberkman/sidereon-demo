@@ -35,6 +35,35 @@ jobs:
           npm test
       - name: Build
         run: npm run build
+      - name: Install browser for functional checks
+        run: npx playwright install --with-deps chromium
+      - name: Verify bundled browser WASM flows
+        env:
+          BASE: http://127.0.0.1:4173
+        run: |
+          set -euo pipefail
+          mkdir -p browser-evidence
+          npm run preview -- --host 127.0.0.1 > browser-evidence/preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$BASE" >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            cat browser-evidence/preview.log
+            exit 1
+          fi
+
+          timeout 120s node scripts/verify-solve.mjs 2>&1 | tee browser-evidence/verify-solve.log
+          timeout 120s node scripts/verify-pair.mjs 2>&1 | tee browser-evidence/verify-pair.log
+          timeout 180s node scripts/verify-rtk.mjs 2>&1 | tee browser-evidence/verify-rtk.log
+          mv screenshots browser-evidence/local-screenshots
       - name: Check Go module discovery page
         run: |
           grep -Fq '<meta name="go-import" content="sidereon.dev/go/v3 git https://github.com/neilberkman/sidereon-go">' dist/go/v3/index.html
@@ -128,3 +157,24 @@ jobs:
           done
           echo "live Go module discovery metadata is missing or malformed" >&2
           exit 1
+      - name: Verify live browser WASM flows
+        if: github.event_name != 'pull_request'
+        env:
+          BASE: https://sidereon.dev
+        run: |
+          set -euo pipefail
+          mkdir -p browser-evidence
+          trap 'if [ -d screenshots ]; then rm -rf browser-evidence/live-screenshots; mv screenshots browser-evidence/live-screenshots; fi' EXIT
+          timeout 120s node scripts/verify-solve.mjs 2>&1 | tee browser-evidence/live-verify-solve.log
+          timeout 120s node scripts/verify-pair.mjs 2>&1 | tee browser-evidence/live-verify-pair.log
+          timeout 180s node scripts/verify-rtk.mjs 2>&1 | tee browser-evidence/live-verify-rtk.log
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-functional-evidence-${{ github.sha }}
+          path: |
+            browser-evidence/
+            screenshots/
+          if-no-files-found: error
+          retention-days: 7
