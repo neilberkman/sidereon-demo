@@ -1,0 +1,67 @@
+name: Prepare Sidereon SDK 3.0.2 lock
+
+on:
+  push:
+    branches: [release/3.0.2-20261005]
+    paths:
+      - .github/workflows/prepare-sdk-302.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-sdk-302-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: Resolve exact public npm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Resolve Sidereon 3.0.2 without lifecycle scripts
+        run: >-
+          npm install --package-lock-only --ignore-scripts --save-exact
+          @neilberkman/sidereon@3.0.2
+
+      - name: Verify exact registry resolution
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from "node:assert/strict";
+          import { readFileSync } from "node:fs";
+
+          const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
+          const manifest = readJson("package.json");
+          const lock = readJson("package-lock.json");
+          const root = lock.packages[""];
+          const sdk = lock.packages["node_modules/@neilberkman/sidereon"];
+
+          assert.equal(manifest.dependencies["@neilberkman/sidereon"], "3.0.2");
+          assert.equal(root.dependencies["@neilberkman/sidereon"], "3.0.2");
+          assert.equal(sdk.version, "3.0.2");
+          assert.equal(
+            sdk.resolved,
+            "https://registry.npmjs.org/@neilberkman/sidereon/-/sidereon-3.0.2.tgz",
+          );
+          assert.match(sdk.integrity, /^sha512-[A-Za-z0-9+/]+={0,2}$/);
+          console.log(`resolved ${sdk.resolved}`);
+          console.log(`integrity ${sdk.integrity}`);
+          NODE
+
+      - name: Upload genuine manifest and lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidereon-demo-sdk-3.0.2-${{ github.sha }}
+          path: |
+            package.json
+            package-lock.json
+          if-no-files-found: error
+          retention-days: 3
