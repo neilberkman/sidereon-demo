@@ -114,17 +114,6 @@ export interface ScreenResult {
   totalHits: number; // total local minima below the threshold (pre-truncation)
 }
 
-// Plain mirrors of the engine shapes (the screen function returns `any`).
-interface TcaCandidateRaw {
-  missDistanceKm: number;
-  tcaSecondsSinceWindowStart: number;
-  relativeVelocityKmS: [number, number, number];
-}
-interface TcaScreeningHitRaw {
-  secondaryIndex: number;
-  candidate: TcaCandidateRaw;
-}
-
 // Comet-trail geometry, matching globe.buildTrails EXACTLY: 18 samples per sat at
 // a 120 s step, drawn as adjacent line segments with per-vertex alpha a*a*0.95,
 // grouped by constellation.
@@ -466,7 +455,7 @@ const api = {
       endMicros,
       thresholdKm,
       { coarseStepSeconds },
-    ) as TcaScreeningHitRaw[];
+    );
     const startMs = Number(startMicros / 1000n);
     const mapped: ConjunctionHit[] = (hits ?? []).map((h) => {
       const c = h.candidate;
