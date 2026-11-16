@@ -547,17 +547,24 @@ function startLoop() {
   // Hz; the WebGL globe does not need that, and pinning it lower frees the main
   // thread during scroll (less "tug") and the GPU during steady auto-rotate. The
   // 250ms property cadence below is unaffected (40fps >> 4Hz). Desktop is uncapped.
+  // Everywhere, the steady state (only the slow auto-rotation and the 4 Hz
+  // satellite updates) renders at 30 fps; drags, tweens and crossfades render at
+  // the display rate. Redrawing a nearly static globe at 120 Hz cost a desktop
+  // CPU core for no visible difference.
   const coarsePointer = window.matchMedia ? window.matchMedia("(pointer: coarse)").matches : false;
-  const minFrameMs = coarsePointer ? 1000 / 40 : 0;
+  const steadyFrameMs = 1000 / 30;
+  const activeFrameMs = coarsePointer ? 1000 / 40 : 0;
   let lastFrame = 0;
   const loop = () => {
     raf = 0;
     if (document.hidden || !globeOnscreen) return;
     const t = performance.now();
+    const minFrameMs = globe.wantsFullFrameRate() ? activeFrameMs : steadyFrameMs;
     if (minFrameMs && t - lastFrame < minFrameMs) {
       raf = requestAnimationFrame(loop);
       return;
     }
+    const dtSeconds = lastFrame ? Math.min(0.1, (t - lastFrame) / 1000) : 1 / 60;
     lastFrame = t;
     const glLost = globe.isContextLost();
     if (!glLost) {
@@ -565,7 +572,7 @@ function startLoop() {
         globeFramingDirty = false;
         applyGlobeFraming();
       }
-      globe.render();
+      globe.render(dtSeconds);
     }
     if (t - lastProp >= 250) {
       const now = new Date();

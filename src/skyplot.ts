@@ -62,6 +62,11 @@ export class Skyplot {
     this.last = performance.now();
     const loop = (t: number) => {
       if (!this.running) return;
+      // The sweep is drawn at 30 fps; it advances by elapsed time either way.
+      if (t - this.last < 1000 / 30) {
+        this.raf = requestAnimationFrame(loop);
+        return;
+      }
       const dt = Math.min(0.05, (t - this.last) / 1000);
       this.last = t;
       this.sweep = (this.sweep + dt * 1.1) % TWO_PI; // ~5.7 s per revolution
