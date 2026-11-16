@@ -792,7 +792,7 @@ const RTK_MODEL = {
   codeSigmaM: 2.0,
   phaseSigmaM: 0.01,
   sagnac: true,
-  stochastic: "simple",
+  stochastic: "simple" as const,
   elevationWeighting: true,
 };
 const RTK_SOLVE_OPTIONS = {

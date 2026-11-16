@@ -66,7 +66,9 @@ jobs:
           mv screenshots browser-evidence/local-screenshots
       - name: Check Go module discovery page
         run: |
-          grep -Fq '<meta name="go-import" content="sidereon.dev/go/v3 git https://github.com/neilberkman/sidereon-go">' dist/go/v3/index.html
+          for major in v3 v4; do
+            grep -Fq "<meta name=\"go-import\" content=\"sidereon.dev/go/${major} git https://github.com/neilberkman/sidereon-go\">" "dist/go/${major}/index.html"
+          done
       - name: Upload to BunnyCDN and purge
         if: github.event_name != 'pull_request'
         env:
@@ -139,24 +141,30 @@ jobs:
       - name: Verify live Go module discovery
         if: github.event_name != 'pull_request'
         run: |
-          expected='<meta name="go-import" content="sidereon.dev/go/v3 git https://github.com/neilberkman/sidereon-go">'
-          grep -Fq "$expected" dist/go/v3/index.html
-          for attempt in $(seq 1 12); do
-            if curl --fail --silent --show-error \
-              -D /tmp/live-go-import-headers.txt \
-              "https://sidereon.dev/go/v3?go-get=1&deploy=${GITHUB_SHA}-${attempt}" \
-              -o /tmp/live-go-import.html; then
-              if grep -Eiq '^content-type:[[:space:]]*text/html([;[:space:]]|$)' /tmp/live-go-import-headers.txt \
-                && grep -Fq "$expected" /tmp/live-go-import.html; then
-                echo "live Go module discovery metadata verified"
-                exit 0
+          for major in v3 v4; do
+            expected="<meta name=\"go-import\" content=\"sidereon.dev/go/${major} git https://github.com/neilberkman/sidereon-go\">"
+            grep -Fq "$expected" "dist/go/${major}/index.html"
+            verified=0
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent --show-error \
+                -D /tmp/live-go-import-headers.txt \
+                "https://sidereon.dev/go/${major}?go-get=1&deploy=${GITHUB_SHA}-${attempt}" \
+                -o /tmp/live-go-import.html; then
+                if grep -Eiq '^content-type:[[:space:]]*text/html([;[:space:]]|$)' /tmp/live-go-import-headers.txt \
+                  && grep -Fq "$expected" /tmp/live-go-import.html; then
+                  echo "live Go module discovery metadata verified for ${major}"
+                  verified=1
+                  break
+                fi
               fi
+              echo "attempt $attempt: waiting for Go module route propagation (${major})"
+              sleep 5
+            done
+            if [ "$verified" -ne 1 ]; then
+              echo "live Go module discovery metadata is missing or malformed for ${major}" >&2
+              exit 1
             fi
-            echo "attempt $attempt: waiting for Go module route propagation"
-            sleep 5
           done
-          echo "live Go module discovery metadata is missing or malformed" >&2
-          exit 1
       - name: Verify live browser WASM flows
         if: github.event_name != 'pull_request'
         env:

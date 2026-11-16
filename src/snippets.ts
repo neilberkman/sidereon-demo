@@ -6,7 +6,7 @@
 //   C       sidereon-c/bindings/c/include/sidereon.h
 //   Elixir  sidereon-ex/lib/sidereon.ex + lib/sidereon/gnss/*
 //   JS/WASM sidereon-wasm/pkg/sidereon.d.ts
-//   Go      sidereon-go (sidereon.dev/go/v3)
+//   Go      sidereon-go (sidereon.dev/go/v4)
 // One engine, six languages.
 
 export type CapId = "propagate" | "spp";
@@ -1149,10 +1149,10 @@ console.log(solution.rxClockS);  // receiver clock bias, seconds`,
     id: "go",
     name: "Go",
     tag: "go",
-    install: "go get sidereon.dev/go/v3",
+    install: "go get sidereon.dev/go/v4",
     installNote: "Go modules, cgo",
-    registry: "https://pkg.go.dev/sidereon.dev/go/v3",
-    registryLabel: "pkg.go.dev/sidereon.dev/go/v3",
+    registry: "https://pkg.go.dev/sidereon.dev/go/v4",
+    registryLabel: "pkg.go.dev/sidereon.dev/go/v4",
     filename: "main.go",
     caps: {
       propagate: `package main
@@ -1161,7 +1161,7 @@ import (
 	"fmt"
 	"time"
 
-	"sidereon.dev/go/v3"
+	"sidereon.dev/go/v4"
 )
 
 func main() {
@@ -1195,7 +1195,7 @@ func main() {
 import (
 	"fmt"
 
-	"sidereon.dev/go/v3"
+	"sidereon.dev/go/v4"
 )
 
 // Precise orbits (SP3-c), trimmed to the satellites and epoch below.
