@@ -120,6 +120,10 @@ export class Globe {
   private fadeLines: Line2[] = []; // outgoing set during a click crossfade
   private fadeMats: LineMaterial[] = [];
   private trackFade = 1; // 0..1 crossfade progress (1 = settled)
+  // Set while the pointer drives the controls, and the time it last stopped:
+  // damping keeps the camera moving for about a second after release.
+  private dragging = false;
+  private lastInteractionMs = 0;
   // Observer marker pulse while a click's worker result is pending.
   private observerRing?: THREE.Mesh;
   private observerPulsing = false;
@@ -186,6 +190,13 @@ export class Globe {
     this.controls.enablePan = false;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 0.18;
+    this.controls.addEventListener("start", () => {
+      this.dragging = true;
+    });
+    this.controls.addEventListener("end", () => {
+      this.dragging = false;
+      this.lastInteractionMs = performance.now();
+    });
     // Touch handling. The canvas is a full-bleed fixed scene behind a scrolling
     // page. The earlier `pan-y` compromise (reserve vertical gestures for native
     // page scroll, give horizontal-dominant drags to OrbitControls) made the
@@ -950,7 +961,21 @@ export class Globe {
     this.applyFraming(); // re-anchor the stage framing to the new size
   }
 
-  render(): void {
+  // True while something on the globe moves faster than the slow auto-rotation:
+  // a drag, its damping tail, a camera tween, or a ground-track crossfade. The
+  // loop renders those at the display rate and everything else at a lower rate.
+  wantsFullFrameRate(): boolean {
+    return (
+      this.dragging ||
+      this.camTween !== null ||
+      this.trackFade < 1 ||
+      performance.now() - this.lastInteractionMs < 1500
+    );
+  }
+
+  // `dtSeconds` is the time since the previous rendered frame. Auto-rotation
+  // advances by elapsed time, so its speed does not depend on the frame rate.
+  render(dtSeconds: number): void {
     if (this.contextLost) return;
     if (this.camTween) {
       // Auto-center / reset tween: ease the camera to the goal (easeInOutQuad),
@@ -966,7 +991,7 @@ export class Globe {
         this.controls.enabled = true;
       }
     } else {
-      this.controls.update();
+      this.controls.update(dtSeconds);
     }
     // Crossfade a freshly-clicked ground-track set in while the old set fades out
     // (quick but smooth); periodic refreshes swap instantly and never enter here.
