@@ -62,6 +62,7 @@ jobs:
 
           timeout 120s node scripts/verify-solve.mjs 2>&1 | tee browser-evidence/verify-solve.log
           timeout 120s node scripts/verify-pair.mjs 2>&1 | tee browser-evidence/verify-pair.log
+          timeout 150s node scripts/verify-attitude.mjs 2>&1 | tee browser-evidence/verify-attitude.log
           timeout 180s node scripts/verify-rtk.mjs 2>&1 | tee browser-evidence/verify-rtk.log
           mv screenshots browser-evidence/local-screenshots
       - name: Check Go module discovery page
@@ -175,6 +176,7 @@ jobs:
           trap 'if [ -d screenshots ]; then rm -rf browser-evidence/live-screenshots; mv screenshots browser-evidence/live-screenshots; fi' EXIT
           timeout 120s node scripts/verify-solve.mjs 2>&1 | tee browser-evidence/live-verify-solve.log
           timeout 120s node scripts/verify-pair.mjs 2>&1 | tee browser-evidence/live-verify-pair.log
+          timeout 150s node scripts/verify-attitude.mjs 2>&1 | tee browser-evidence/live-verify-attitude.log
           timeout 180s node scripts/verify-rtk.mjs 2>&1 | tee browser-evidence/live-verify-rtk.log
       - name: Upload browser evidence
         if: always()

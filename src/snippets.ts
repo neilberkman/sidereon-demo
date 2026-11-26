@@ -9,7 +9,7 @@
 //   Go      sidereon-go (sidereon.dev/go/v4)
 // One engine, six languages.
 
-export type CapId = "propagate" | "spp";
+export type CapId = "propagate" | "spp" | "attitude";
 export type LangId = "rust" | "python" | "c" | "elixir" | "js" | "go";
 
 export interface Capability {
@@ -30,6 +30,12 @@ export const CAPABILITIES: Capability[] = [
     label: "SP3 + SPP solve",
     blurb:
       "Load a precise SP3 ephemeris and solve a single-point position from pseudoranges.",
+  },
+  {
+    id: "attitude",
+    label: "GNSS attitude",
+    blurb:
+      "Evaluate the published GPS Block IIF yaw law along a broadcast orbit. The epoch is in TDB seconds past J2000, with navigation coverage before and after it.",
   },
 ];
 
@@ -56,6 +62,19 @@ export const LANGUAGES: Language[] = [
     registryLabel: "crates.io/crates/sidereon",
     filename: "main.rs",
     caps: {
+      attitude: `use sidereon::astro::attitude::gnss::{
+    gnss_attitude, GnssAttitudeLaw, GnssBlock, OrbitAttitudeTrajectory,
+};
+use sidereon::astro::frames::TdbEarthOrientationProvider;
+
+let block = GnssBlock::from_igs_name("BLOCK IIF")?;
+let law = GnssAttitudeLaw::for_block(block, Some(9))?;
+let orientation = TdbEarthOrientationProvider::new();
+let trajectory = OrbitAttitudeTrajectory::from_broadcast(
+    &nav, "G09".parse()?, &orientation,
+);
+let attitude = gnss_attitude(&law, &trajectory, tdb_seconds)?;
+println!("yaw {:.4} rad, mode {:?}", attitude.yaw_rad, attitude.mode);`,
       propagate: `use sidereon::astro::passes::{look_angle, GroundStation, UtcInstant};
 
 let line1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009";
@@ -274,6 +293,15 @@ println!("clock s {}", fix.rx_clock_s);`,
     registryLabel: "pypi.org/project/sidereon",
     filename: "track.py",
     caps: {
+      attitude: `from sidereon import (
+    GnssAttitudeLaw, GnssBlock, OrbitAttitudeTrajectory, gnss_attitude,
+)
+
+block = GnssBlock.from_igs_name("BLOCK IIF")
+law = GnssAttitudeLaw.for_block(block, 9)
+trajectory = OrbitAttitudeTrajectory.from_broadcast(nav, "G09")
+attitude = gnss_attitude(law, trajectory, tdb_seconds)
+print(attitude.yaw_rad, attitude.mode)`,
       propagate: `import numpy as np
 import sidereon
 
@@ -485,6 +513,30 @@ print(solution.rx_clock_s)   # receiver clock bias, seconds`,
     registryLabel: "github.com/neilberkman/sidereon-c",
     filename: "track.c",
     caps: {
+      attitude: `#include <sidereon.h>
+#include <stdio.h>
+
+enum SidereonStatus print_yaw(
+    const struct SidereonBroadcastEphemeris *nav, double tdb_seconds)
+{
+    struct SidereonGnssAttitudeLaw *law = NULL;
+    struct SidereonOrbitAttitudeTrajectory *trajectory = NULL;
+    struct SidereonGnssAttitude attitude;
+    enum SidereonStatus status = sidereon_gnss_attitude_law_for_block(
+        SIDEREON_GNSS_BLOCK_GPS_IIF, 9, &law);
+    if (status != SIDEREON_STATUS_OK) return status;
+
+    status = sidereon_orbit_attitude_trajectory_from_broadcast(
+        nav, "G09", NULL, &trajectory);
+    if (status == SIDEREON_STATUS_OK) {
+        status = sidereon_gnss_attitude(law, trajectory, tdb_seconds, &attitude);
+        sidereon_orbit_attitude_trajectory_free(trajectory);
+        if (status == SIDEREON_STATUS_OK)
+            printf("yaw %.4f rad, mode %d\\n", attitude.yaw_rad, (int)attitude.mode);
+    }
+    sidereon_gnss_attitude_law_free(law);
+    return status;
+}`,
       propagate: `#include "sidereon.h"
 
 char err[256];
@@ -740,6 +792,15 @@ sidereon_sp3_free(sp3);`,
     registryLabel: "hex.pm/packages/sidereon",
     filename: "track.exs",
     caps: {
+      attitude: `alias Sidereon.GNSS.Attitude
+alias Sidereon.GNSS.Attitude.{GnssAttitudeLaw, GnssBlock, OrbitAttitudeTrajectory}
+
+with {:ok, block} <- GnssBlock.from_igs_name("BLOCK IIF"),
+     {:ok, law} <- GnssAttitudeLaw.for_block(block, 9),
+     {:ok, trajectory} <- OrbitAttitudeTrajectory.from_broadcast(nav, "G09", :tdb),
+     {:ok, attitude} <- Attitude.gnss_attitude(law, trajectory, tdb_seconds) do
+  IO.inspect({attitude.yaw_rad, attitude.mode})
+end`,
       propagate: `line1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009"
 line2 = "2 25544  51.6400 208.8657 0002644 250.3037 109.7782 15.49560812999990"
 station = %{latitude: 51.5, longitude: -0.1, altitude_m: 10.0}
@@ -942,6 +1003,22 @@ end`,
     registryLabel: "npmjs.com/package/@neilberkman/sidereon",
     filename: "track.mjs",
     caps: {
+      attitude: `import init, {
+  AttitudeMode, GnssAttitudeLaw, GnssBlock, OrbitAttitudeTrajectory, gnssAttitude,
+} from "@neilberkman/sidereon";
+
+await init();
+
+const block = GnssBlock.fromIgsName("BLOCK IIF");
+const law = GnssAttitudeLaw.forBlock(block, 9);
+const trajectory = OrbitAttitudeTrajectory.fromBroadcast(nav, "G09");
+const attitude = gnssAttitude(law, trajectory, tdbSeconds);
+console.log(attitude.yawRad, AttitudeMode[attitude.mode]);
+
+attitude.free();
+trajectory.free();
+law.free();
+block.free();`,
       propagate: `import init, { Tle, GroundStation } from "@neilberkman/sidereon";
 
 await init();
@@ -1155,6 +1232,34 @@ console.log(solution.rxClockS);  // receiver clock bias, seconds`,
     registryLabel: "pkg.go.dev/sidereon.dev/go/v4",
     filename: "main.go",
     caps: {
+      attitude: `import (
+    "fmt"
+    "sidereon.dev/go/v4"
+)
+
+func printYaw(nav *sidereon.BroadcastEphemeris, tdbSeconds float64) error {
+    block, err := sidereon.GNSSBlockFromIGSName("BLOCK IIF")
+    if err != nil {
+        return err
+    }
+    law, err := sidereon.GNSSAttitudeLawForBlock(block, 9)
+    if err != nil {
+        return err
+    }
+    defer law.Close()
+    trajectory, err := sidereon.OrbitAttitudeTrajectoryFromBroadcast(nav, "G09", nil)
+    if err != nil {
+        return err
+    }
+    defer trajectory.Close()
+
+    attitude, err := sidereon.GnssAttitude(law, trajectory, tdbSeconds)
+    if err != nil {
+        return err
+    }
+    fmt.Printf("yaw %.4f rad, mode %v\\n", attitude.YawRad, attitude.Mode)
+    return nil
+}`,
       propagate: `package main
 
 import (

@@ -2,11 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>sidereon · reference-validated GNSS + astrodynamics, in six languages</title>
     <meta
       name="description"
-      content="One reference-validated GNSS and astrodynamics engine. A Rust core with first-class interfaces in Rust, Go, Python, C, Elixir, and WebAssembly."
+      content="One reference-validated GNSS and astrodynamics engine. A Rust core with interfaces in Rust, Go, Python, C, Elixir, and WebAssembly."
     />
   </head>
   <body>
@@ -250,6 +251,29 @@
             </section>
           </div>
 
+          <section class="panel live-panel attitude-panel" id="attitude-panel">
+            <div class="panel-head">
+              <span class="dot amber"></span>GNSS ATTITUDE · GPS YAW
+              <button class="maximize" data-panel="attitude" title="Expand" aria-label="Expand GNSS attitude">⤢</button>
+            </div>
+            <div class="panel-body" id="attitude-home">
+              <div id="attitude-content">
+                <div class="attitude-controls">
+                  <div class="lab-field">
+                    <label for="attitude-satellite">SATELLITE</label>
+                    <select class="lab-select" id="attitude-satellite"></select>
+                  </div>
+                  <span id="attitude-date"></span>
+                </div>
+                <canvas id="attitude-chart" class="attitude-chart" role="img"
+                  aria-label="GPS yaw, nominal yaw, Sun elevation, and yaw mode by UTC hour"></canvas>
+                <div class="attitude-legend" id="attitude-legend"></div>
+                <div class="attitude-status" id="attitude-status" role="status">Awaiting broadcast navigation data.</div>
+                <p class="attitude-note">One ABMF broadcast orbit per satellite, extrapolated beyond its fit interval.</p>
+              </div>
+            </div>
+          </section>
+
           <section class="panel live-panel track-panel" id="track-cleanup-panel">
             <div class="panel-head">
               <span class="dot amber"></span>TRACK CLEANUP · LIVE PHONE DRIVE
@@ -473,10 +497,10 @@
         <div class="wrap">
           <div class="section-head">
             <span class="kicker">VALIDATION</span>
-            <h2>Checked against Vallado, Skyfield, IGS, and IERS.</h2>
+            <h2>Checked against published references.</h2>
             <p class="dek">
-              Every subsystem is verified against the reference implementation for its domain,
-              and where that reference is open, sidereon ships the parity trace.
+              Reference comparisons include Vallado’s propagation vectors, IGS orbit products,
+              and Orekit astrodynamics models.
             </p>
           </div>
           <div class="valid-grid" id="valid-grid"></div>
