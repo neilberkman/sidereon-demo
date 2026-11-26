@@ -395,6 +395,7 @@ export interface SppProvenance {
 }
 
 export interface SppData {
+  navBytes: Uint8Array;
   nav: BroadcastEphemeris;
   observations: { satelliteId: string; pseudorangeM: number }[];
   glonassChannels: [number, number][];
@@ -440,7 +441,8 @@ export async function loadSppData(): Promise<SppData> {
   const navBuf = await (await okFetch("/data/abmf_nav.rnx")).arrayBuffer();
 
   const obs = parseRinexObs(new Uint8Array(obsBuf as ArrayBuffer));
-  const nav = parseRinexNav(new Uint8Array(navBuf as ArrayBuffer));
+  const navBytes = new Uint8Array(navBuf);
+  const nav = parseRinexNav(navBytes);
 
   const [obsSha256, navSha256] = await Promise.all([sha256Hex(obsBuf), sha256Hex(navBuf)]);
 
@@ -529,6 +531,7 @@ export async function loadSppData(): Promise<SppData> {
   );
 
   return {
+    navBytes,
     nav,
     observations,
     glonassChannels,

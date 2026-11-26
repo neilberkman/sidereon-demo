@@ -47,6 +47,7 @@ import type {
   ConjunctionHit,
 } from "./worker";
 import { Globe } from "./globe";
+import { setupAttitudePanel } from "./attitude-panel";
 import { Skyplot, type SkyPoint, type SkyArc } from "./skyplot";
 import { CONSTELLATION, turbo, turboCss, type Constellation } from "./colors";
 import {
@@ -174,7 +175,7 @@ let globe: Globe;
 let sppData: SppData | null = null;
 let rtkAssets: RtkAssetBundle | null = null;
 let tecField: TecField | null = null;
-let tecWarmup: Promise<TecField> | null = null;
+let showAttitudeSamples: ReturnType<typeof setupAttitudePanel>;
 let observer: { lat: number; lon: number } | null = null;
 let visible: VisibleSat[] = [];
 let lastDual: DualSolve | null = null;
@@ -427,6 +428,8 @@ async function boot() {
 
   line('<span class="ok">›</span> staging IGS station ABMF RINEX obs + broadcast nav · hashing inputs');
   sppData = await loadSppData();
+  await observeApi.initAttitude(sppData.navBytes);
+  showAttitudeSamples = setupAttitudePanel((satellite) => observeApi.attitudeDay(satellite));
   line(
     `  OBS · <span class="em">${sppData.provenance.obsBytes.toLocaleString()}</span> B · sha256 <span class="em">${sppData.provenance.obsSha256.slice(0, 12)}</span>` +
       ` · NAV · <span class="em">${sppData.provenance.navBytes.toLocaleString()}</span> B · sha256 <span class="em">${sppData.provenance.navSha256.slice(0, 12)}</span>`,
@@ -451,7 +454,15 @@ async function boot() {
   renderRtkPanel();
   await sleep(70);
 
-  line("  IONEX · lazy on TEC toggle");
+  try {
+    tecField = await loadTecField();
+    drawTecMap(tecField, $("tec-map") as HTMLCanvasElement, $("tec-scale"));
+    $("tec-stats").textContent = "Global VTEC map ready";
+  } catch (error) {
+    showError("IONEX load failed", error);
+    $("tec-stats").textContent = "IONEX data unavailable";
+    ($("tec-toggle") as HTMLInputElement).disabled = true;
+  }
   await sleep(35);
   line('<span class="ok">›</span> instrument ready · the engine is live in this tab');
 
@@ -1021,6 +1032,7 @@ function drawSolveScatterFrame(): void {
 
 function drawSolveScatterCanvas(canvas: HTMLCanvasElement, points: SolveScatterPoint[]): void {
   const rect = canvas.getBoundingClientRect();
+  if (Math.min(rect.width, rect.height) <= 60) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const w = Math.max(1, Math.round(rect.width * dpr));
   const h = Math.max(1, Math.round(rect.height * dpr));
@@ -1749,6 +1761,7 @@ function drawRtkCanvas(progress = 1): void {
   const canvas = document.getElementById("rtk-canvas") as HTMLCanvasElement | null;
   if (!canvas) return;
   const rect = canvas.getBoundingClientRect();
+  if (Math.min(rect.width, rect.height) <= 60) return;
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   const w = Math.max(1, Math.round(rect.width * dpr));
   const h = Math.max(1, Math.round(rect.height * dpr));
@@ -1883,51 +1896,12 @@ async function runRtkPanel(): Promise<void> {
 }
 
 // ---- IONEX TEC -------------------------------------------------------------
-let tecSeq = 0;
-
-function warmTecField(): Promise<TecField> {
-  if (tecField) return Promise.resolve(tecField);
-  if (!tecWarmup) {
-    tecWarmup = loadTecField()
-      .then((field) => {
-        tecField = field;
-        drawTecMap(field, $("tec-map") as HTMLCanvasElement, $("tec-scale"));
-        return field;
-      })
-      .catch((e) => {
-        tecWarmup = null;
-        throw e;
-      });
-  }
-  return tecWarmup;
-}
-
-async function toggleTec(on: boolean) {
-  const seq = ++tecSeq;
-  try {
-    if (!on) {
-      if (tecField) globe.setTec(tecField, false);
-      refreshSlant();
-      return;
-    }
-    if (!tecField) {
-      $("tec-stats").textContent = "sampling global VTEC…";
-      const field = await warmTecField();
-      if (seq !== tecSeq) return;
-      tecField = field;
-      drawTecMap(tecField, $("tec-map") as HTMLCanvasElement, $("tec-scale"));
-    }
-    if (seq !== tecSeq) return;
-    globe.setTec(tecField, true);
-    const ep = new Date((tecField.epochJ2000S + 946728000) * 1000);
-    $("tec-stats").innerHTML = `<span>${tecField.min.toFixed(1)}–${tecField.max.toFixed(1)} TECU</span><span>${ep.toISOString().slice(0, 16).replace("T", " ")}Z</span>`;
-    refreshSlant();
-    updateNetPill();
-  } catch (e) {
-    showError("IONEX load failed", e);
-    $("tec-stats").textContent = "IONEX load failed";
-    ($("tec-toggle") as HTMLInputElement).checked = false;
-  }
+function toggleTec(on: boolean) {
+  if (!tecField) return;
+  globe.setTec(tecField, on);
+  const ep = new Date((tecField.epochJ2000S + 946728000) * 1000);
+  $("tec-stats").innerHTML = `<span>${tecField.min.toFixed(1)}–${tecField.max.toFixed(1)} TECU</span><span>${ep.toISOString().slice(0, 16).replace("T", " ")}Z</span>`;
+  refreshSlant();
 }
 
 function drawTecMap(field: TecField, canvas: HTMLCanvasElement, scaleEl: HTMLElement) {
@@ -2335,7 +2309,7 @@ const CAP_CARDS: [string, string][] = [
   ["ERROR BOUNDS", "Covariance-derived error bounds (CEP, R95, SEP, error ellipse) with weak-geometry observability classification on every solve and per-observation reliability (minimal detectable bias, with zero-redundancy observations reported uncheckable), so bounds stay wide or flagged instead of manufacturing confidence."],
   ["DOP", "Geometric dilution of precision from receiver-satellite line-of-sight geometry."],
   ["TRACK FILTERING", "A covariance-weighted track filter for position fixes, no IMU required: fixes arriving with wide covariances get low weight, so weak-geometry spikes cannot pull the track, and a fixed-interval smoother polishes the result. The same engine cleans a real phone GPS track in the companion notebook."],
-  ["GNSS/INS FUSION", "Strapdown mechanization with error-state EKF and UKF filtering: loose and tight coupling valid from a single satellite, robust updates that reweight outliers per the published schemes, and an RTS smoother. Field behavior is pinned by simulator-backed tests: fused beats GNSS-only under an outlier budget, outages coast within the IMU-grade bound, and low-satellite windows stay covariance-consistent."],
+  ["GNSS/INS FUSION", "Strapdown mechanization with error-state EKF and UKF filtering: loose and tight coupling valid from a single satellite, robust updates that reweight outliers per the published schemes, and an RTS smoother. Field behavior is pinned by simulator-backed tests: the tests cover outliers, outages, and covariance consistency with few satellites."],
   ["GEOFENCING", "Uncertainty-aware geodesic geofencing: containment and crossing probabilities computed from the position covariance, with hysteresis for alert stability, so fences stop lying exactly when positions are worst."],
   ["SOURCE LOCALIZATION", "Locate an emission event (acoustic, seismic, or RF) from arrival times at a network of known sensors: robust time-of-arrival and TDOA multilateration with a closed-form initializer, a generalized dilution-of-precision, and a Cramer-Rao bound for sensor-placement analysis."],
   ["SIDEREAL FILTERING", "Repeating-geometry multipath removal: per-satellite orbit repeat lag from the ephemeris, phase-stacked template subtraction built only from prior cycles, and a periodicity diagnostic that separates a 24h00m thermal signature from a 23h56m geometry signature in the data."],
@@ -2350,25 +2324,32 @@ const CAP_CARDS: [string, string][] = [
   ["ATMOSPHERE", "Troposphere (Saastamoinen with Niell/VMF mapping) and ionosphere (Klobuchar, IONEX maps, and Galileo NeQuick-G) path delays."],
   ["TERRAIN", "DTED terrain-elevation lookup with one-call tile fetch for observer and target heights, returned as orthometric heights with explicit, fail-closed conversion to ellipsoidal height through the EGM96 geoid. Terrain stores memory-map at open - constant memory even for a 30+ GB store, demand-paged by query region - with checksummed content, caller-attested digests for platform-verified mounts, and on-demand escalation back to a full verification pass."],
   ["GEODESY", "Geodesic direct and inverse problems on the WGS84 ellipsoid after Karney, robust through antipodal and near-conjugate cases, an epoch-aware terrestrial reference frame catalog with published ITRF and ETRF Helmert parameter sets, and EGM2008 geoid grids alongside EGM96."],
-  ["FRAMES + TIME", "TEME, GCRS, and ITRS transforms with IAU time scales and Earth orientation; geoid undulation and orthometric heights."],
+  ["FRAMES + TIME", "TEME, GCRS, and ITRS transforms with IAU time scales, plus geoid undulation and orthometric heights."],
   ["CLOCK STABILITY", "Allan-family frequency stability for receiver and reference clocks: overlapping and modified Allan deviation, Hadamard deviation, and time deviation, with per-octave power-law noise identification and a five-coefficient fit, per IEEE-1139."],
   ["SCENARIO SIMULATION", "A deterministic scenario simulator with a per-term error budget: bit-reproducible synthetic observables plus a ground-truth ledger that attributes every metre of solver error to clock, ionosphere, troposphere, noise, or multipath."],
   ["SIGNAL ANALYSIS", "Closed-form navigation-signal figures of merit: BPSK and BOC spectra, spectral separation coefficients, DLL thermal-noise jitter, and multipath error envelopes, validated against published constants."],
-  ["SGP4", "Two-line element propagation in the TEME frame, batched and parallelized across epochs to sweep a whole constellation fast."],
-  ["FORCE MODELS", "Composable perturbation forces for numerical propagation: zonal harmonics through J6, Sun and Moon third-body attraction, cannonball solar radiation pressure with conical shadow, relativistic correction, and NRLMSISE-00 drag, each validated against its published closed form."],
+  ["SGP4", "Two-line element propagation in the TEME frame, batched and parallelized across satellites and epochs."],
+  ["FORCE MODELS", "Compose zonal harmonics through J6, Sun and Moon third-body gravity, cannonball solar radiation pressure, relativistic correction, and NRLMSISE-00 drag. Radiation pressure supports apparent-disc and conical shadows."],
+  ["GNSS ATTITUDE", "Evaluate block-specific yaw laws along a satellite trajectory, including noon, midnight, and shadow turns. Output includes nominal yaw, Sun elevation, and body and Sun-fixed axes."],
+  ["EMPIRICAL SOLAR RADIATION PRESSURE", "ECOM1 and ECOM2 model GNSS solar radiation pressure with empirical coefficients, configurable Earth and Moon shadows, and partial derivatives for estimation."],
+  ["ICGEM GRAVITY", "Read static and time-variable gravity fields and evaluate them with the Holmes–Featherstone recursion. Supports EGM2008 through degree 2190."],
+  ["ANALYTIC PROPAGATION", "Propagate orbits with the Eckstein–Hechler and Brouwer–Lyddane zonal theories, with conversions between mean and osculating elements."],
   ["ORBITAL DECAY", "Atmospheric-drag modeling with orbital-lifetime and reentry estimation, driven by space-weather indices."],
-  ["ORBIT FIT", "Batch least-squares fit of the numerical propagator to precise ephemerides, reporting a per-satellite radial/along-track/cross-track residual ledger; sparse arcs report an unbounded covariance instead of a fabricated fit."],
-  ["PRECISE ORBITS", "Multi-center SP3 orbit merging with per-cell consensus, outlier rejection, and epoch-aware frame reconciliation from published Helmert sets. Per-epoch provenance records which center supplied every satellite at every epoch and why selection changed, and a physics-based continuity attestation catches spliced arcs by hold-out interpolation residual - metre-scale defects no speed bound can resolve - naming the contributors on both sides of the splice. Window-scoped verdicts answer whether any defect influences the bounded span a consumer will actually evaluate, with the interpolator's own stencil reach deciding what a window can touch."],
+  ["ORBIT FIT", "Batch least squares fits the initial state and selected force parameters, including solar radiation pressure scale and empirical accelerations. Variational equations supply partials, and the fit reports radial, along-track, and cross-track residuals and covariance. Sparse state-only fits can report unbounded covariance."],
+  ["PRECISE ORBITS", "Combine SP3 orbits from multiple centers with per-cell consensus, outlier rejection, and epoch-aware frame reconciliation. Per-epoch provenance identifies the selected center and why it was selected. Continuity tests use hold-out interpolation residuals and can report defects over a specified time window."],
+  ["PREDICTED ORBIT SCORING", "Score predicted SP3, broadcast, or propagated orbits against final SP3. Report radial, transverse, and normal errors and signal-in-space range error by prediction horizon."],
   ["IOD", "Initial orbit determination from three position or angle-only observations (Gibbs, Herrick-Gibbs, Gauss)."],
   ["ELEMENTS", "State-vector to classical orbital-element conversion, plus reduced-orbit fitting and TLE mean-element fitting, with mean, eccentric, and true anomaly conversions and equinoctial elements."],
   ["RELATIVE MOTION", "RIC, RTN, and LVLH relative frames with Clohessy-Wiltshire rendezvous between two spacecraft."],
   ["COVARIANCE", "Six-by-six orbit covariance propagation with process noise and frame transport, feeding the collision-probability integration."],
   ["CONJUNCTION", "Close-approach screening with collision probability, plus reading and writing CCSDS messages: CDM, OMM, OEM, and OPM."],
+  ["IERS 2010 EARTH ORIENTATION", "Transform between GCRF and ITRF from daily Earth-orientation parameters, with celestial pole offsets, subdaily corrections, and length-of-day rotation rates."],
+  ["JPL DE EPHEMERIDES", "Read JPL DE binary ephemerides for geocentric GCRF Sun and Moon states. Use them in third-body gravity, radiation pressure, eclipses, and solid Earth tides."],
   ["SPK", "JPL/NAIF SPK (.bsp) ephemeris kernels with precise state interpolation for planets and spacecraft."],
   ["PASSES", "Acquisition and loss-of-signal pass prediction with azimuth, elevation, and range, from TLEs or precise SP3 orbits."],
   ["APPARENT PLACES", "Apparent right ascension and declination with topocentric azimuth and elevation for the Sun, Moon, and planets from any observer, plus angular separation and position angle."],
   ["ALMANAC", "Equinoxes, solstices, moon phases, planetary oppositions and conjunctions, meridian transits, and solar and lunar eclipse search."],
-  ["ECLIPSE + EVENTS", "Umbra and penumbra crossings with shadow fraction, rise/set and event search, the day-night terminator, and sub-observer geometry."],
+  ["ECLIPSE + EVENTS", "Compute shadow fractions for Earth and Moon occultations, including simultaneous eclipses, and find umbra and penumbra crossings. Also supports rise and set searches, the day-night terminator, and sub-observer geometry."],
   ["RF LINK", "Link-budget analysis and Doppler for the satellite-to-ground path."],
 ];
 function buildCapabilities() {
@@ -2381,10 +2362,24 @@ function buildCapabilities() {
 const VALID_CARDS: [string, string][] = [
   ["SGP4", "Propagation matched against the Vallado and CelesTrak verification vectors."],
   ["FRAMES & TIME", "TEME / GCRS / ITRS transforms checked against Skyfield and the IAU conventions, with EGM96 geoid undulations matched to PROJ."],
-  ["POSITIONING", "Solved against real IGS precise products and a committed parity trace to sub-micron agreement."],
+  ["POSITIONING", "Positioning solutions agree to sub-micron precision with a reference trace based on IGS precise products."],
   ["INTEGRITY", "ARAIM protection levels checked against the WG-C Reference ADD v3.0 worked example, matching the published horizontal and vertical protection levels and the intermediate quantities to their published precision."],
   ["GNSS DATA QUALITY", "Completeness and signal-strength QC cross-checked against an independent extraction oracle on real IGS multi-GNSS stations, MP1/MP2 multipath matched to teqc +qc to sub-micrometer, and RTCM carrier-phase lock-time indicators cross-checked against an RTKLIB convbin decode."],
-  ["EARTH ORIENTATION", "IERS Earth-orientation parameters applied for a faithful ITRS realization."],
+  ["IERS 2010 EARTH ORIENTATION", "The tested raw CIRF, TIRF, and ITRF orientations match Orekit 13.1.10 at 0 ULP with Hipparchus 4.0.3. The GPS G03 SP3 comparison against Orekit’s factory frame agrees within 12 µm per position and 30 µm over the arc."],
+  ["DE440 SUN AND MOON", "The tested geocentric Sun and Moon state components from JPL DE440 match Orekit 13.1.10 at 0 ULP with Hipparchus 4.0.3."],
+  ["ANALYTIC SUN AND MOON", "From 1990 to 2050, the analytic GCRS Sun is within 0.0102° and the Moon is within 0.346° and 1087 km of Orekit 13.1.10’s JPL DE440 states."],
+  ["ECOM2", "Against Orekit 13.1.10 and Hipparchus 4.0.3, ECOM2 matches at 0 ULP across 12 orbit and shadow cases and 109 samples. This covers 327 acceleration components and 4,809 position, velocity, and coefficient partials."],
+  ["ORBIT DETERMINATION", "Against Orekit 13.1.10 batch least squares on the 2020-06-25 GPS G03 arc, fits estimating radiation pressure scale, constant RTN accelerations, or nine RTN terms agree within 7e-6 formal standard deviations, 4 µm in post-fit residuals, and 1e-8 in variance factors."],
+  ["ECOM2 PARAMETER ESTIMATION", "Against Orekit 13.1.10 batch least squares on the sunlit 2020-06-25 GPS G03 arc, the D0/Y0/B0, D2B1, and D4B1 estimates agree within 1.2e-6 formal standard deviations, 2.7 µm in post-fit residuals, and 1.1e-8 relative in variance factors."],
+  ["SPHERICAL-HARMONIC GRAVITY", "Against Orekit 13.1.10’s Holmes–Featherstone model on the same ICGEM files, acceleration differences are within 1.0e-15 of the acceleration magnitude through degree 36 and 8.6e-15 at degree 2190. Potentials agree within 1.4e-15 and time-variable coefficients match bit for bit."],
+  ["EMBEDDED EGM96", "Against Orekit 13.1.10’s Holmes–Featherstone model through degree and order 36, the embedded EGM96 agrees within 8.8e-16 of the acceleration magnitude and 5.1e-16 of the potential."],
+  ["J2 GRAVITY", "Orekit 13.1.10’s J2-only perturbation matches at 0 ULP for all 30 acceleration components and 90 position partials across ten GCRF cases."],
+  ["ANALYTIC PROPAGATION", "Eckstein–Hechler agrees with Orekit 13.1.10 within 2.3 µm in position over seven days. Replaying Orekit’s Brouwer–Lyddane terms agrees within 76 µm over seven days. Against numerical integration of the same zonal field, the radial difference within a day stays within 60 m with Brouwer’s published terms. The difference with Orekit’s terms is 2 to 22 km. Near-circular LEO conversions converge in 4 to 7 iterations."],
+  ["PREDICTED ORBIT SCORING", "On identical states, radial, transverse, and normal differences agree with Orekit 13.1.10’s QSW frame to 6e-16 of the difference. For IGS ultra-rapid predictions scored against final orbits, the comparison agrees within 1.3e-8 m radially and 5.2e-8 m transversely and normally."],
+  ["ECLIPSE AND RADIATION PRESSURE", "Against Orekit 13.1.10 and Hipparchus 4.0.3, the tested apparent-disc lighting ratios and gradients match at 0 ULP for single-body and non-mutual two-body eclipses. The radiation pressure comparison also checks acceleration, position partials, and radiation pressure coefficient partials across 144 cases at 0 ULP."],
+  ["GNSS TURN TIMING", "sidereon starts noon, midnight and shadow turns at the geometric crossing it solves for on the trajectory. For circular GPS and GLONASS orbits with the Sun at its mean rate, Orekit 13.1.10’s estimated start differs by up to 3.9 s."],
+  ["ECLIPSE GEOMETRY", "Against the 40-digit Montenbruck and Gill reference and quadrature, the Moon annular case differs by 8.408e-10. Earth and combined eclipses differ by up to 1.163e-9. In 144 cases, sidereon reproduced Orekit 13.1.10’s apparent-disc lighting ratios bit for bit, including grazing values up to 1.423e-6 outside [0, 1] due to floating-point error in Orekit’s formula."],
+  ["MEAN EQUATOR AND EQUINOX OF DATE", "Against Orekit 13.1.10’s IERS 2010 mean-of-date frame from 1990 to 2050, the rotation agrees to 5.9e-15 at Orekit’s TT and 1.44e-14 at sidereon’s TDB after accounting for frame bias."],
 ];
 function buildValidation() {
   $("valid-grid").innerHTML = VALID_CARDS.map(
@@ -2409,7 +2404,7 @@ let overlayPanel: string | null = null;
 // toggle, and the TEC layer toggle. When a panel is maximized we MOVE those
 // real DOM nodes into the overlay instead of cloning them, so every event
 // handler and the shared solve/mask state stay attached and the expanded view
-// has full parity with the inline panel (no duplicate ids, no re-wiring, no
+// uses the same controls as the inline panel (no duplicate ids, no re-wiring, no
 // drift). An anchor comment marks each node's home so it returns to the exact
 // spot when the overlay closes.
 const relocations: { node: HTMLElement; anchor: Comment }[] = [];
@@ -2437,16 +2432,27 @@ function openOverlay(panel: string) {
     sky: "OBSERVER SKYPLOT · PER-SATELLITE AZ / EL / RANGE",
     globe: "LIVE CONSTELLATION · VALIDATED FRAME PIPELINE",
     tec: "IONEX · GLOBAL VERTICAL TEC · SLANT DELAY",
+    attitude: "GNSS ATTITUDE · GPS YAW",
   };
   $("overlay-title").textContent = titles[panel] || "PANEL";
   if (panel === "solve") renderSolveOverlay();
   else if (panel === "sky") renderSkyOverlay();
   else if (panel === "globe") renderGlobeOverlay();
   else if (panel === "tec") renderTecOverlay();
+  else if (panel === "attitude") {
+    const body = $("overlay-body");
+    relocate($("attitude-content"), body);
+    const table = document.createElement("div");
+    table.className = "attitude-samples";
+    body.appendChild(table);
+    showAttitudeSamples?.(table);
+    $("overlay-close").focus();
+  }
   updateSkyLoopState();
 }
 
 function closeOverlay() {
+  const wasAttitude = overlayPanel === "attitude";
   overlayPanel = null;
   $("overlay").hidden = true;
   document.body.classList.remove("overlay-open", "globe-focus");
@@ -2457,6 +2463,10 @@ function closeOverlay() {
   // Return any live controls we moved into the overlay to their inline homes
   // BEFORE wiping the overlay body, or innerHTML = "" would destroy them.
   restoreRelocations();
+  if (wasAttitude) {
+    showAttitudeSamples?.(null);
+    document.querySelector<HTMLButtonElement>('.maximize[data-panel="attitude"]')?.focus();
+  }
   $("overlay-body").innerHTML = "";
   updateSkyLoopState();
 }

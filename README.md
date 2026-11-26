@@ -1,13 +1,7 @@
 # sidereon · marketing site
 
-The landing site for **sidereon**: one reference-validated GNSS and astrodynamics
-engine, built as a single Rust core with first-class interfaces in Rust, Python,
-C, Elixir, and WebAssembly/JavaScript. The site is about the library and its
-polyglot reach. The in-browser solver is one showcase section, not the thesis.
-
-The headline differentiator is the multi-language story. The same validated math
-is reachable as idiomatic code in every ecosystem, including the BEAM, where no
-serious GNSS library has existed before.
+The landing site for **sidereon**, a GNSS and astrodynamics engine with
+interfaces in Rust, Python, C, Go, Elixir, and JavaScript.
 
 ## Install
 
@@ -15,50 +9,47 @@ serious GNSS library has existed before.
 | --- | --- | --- |
 | Rust | `cargo add sidereon` | crates.io/crates/sidereon |
 | Python | `pip install sidereon` | pypi.org/project/sidereon |
-| Elixir | `{:sidereon, "~> 3.0"}` in `mix.exs` | hex.pm/packages/sidereon |
+| Elixir | `{:sidereon, "~> 4.2"}` in `mix.exs` | hex.pm/packages/sidereon |
 | JavaScript / WASM | `npm i @neilberkman/sidereon` | npmjs.com/package/@neilberkman/sidereon |
+| Go | `go get sidereon.dev/go/v4` | pkg.go.dev/sidereon.dev/go/v4 |
 | C | link `libsidereon` + the cbindgen header | github.com/neilberkman/sidereon-c |
 
 Primary repo: https://github.com/neilberkman/sidereon
 
 ## Page structure
 
-1. **Hero** — the featured live constellation globe behind the message: one engine,
-   six languages, with a compact install switcher and the GitHub call to action.
-2. **Language interfaces** — the same capability (propagate a TLE, or load an SP3
-   and run an SPP solve) as real code in Rust / Python / C / Go / Elixir / JavaScript,
-   tabbed by language and capability, each with its install line and registry link.
-3. **Capabilities** — the engine's breadth: SPP, RTK, PPP, SGP4, frames and time
-   (IAU), IONEX, RINEX, conjunction screening (CDM/OMM), ANTEX, DOP, RF link budget.
-4. **Validation** — reference-validated against SGP4 (Vallado/CelesTrak), frames
-   (Skyfield/IAU), positioning (real IGS products), and IERS Earth orientation.
-5. **Live** — the WASM interface running client-side in the tab: the constellation
-   globe, an in-browser SPP solve, an observer skyplot, and a global IONEX TEC map.
-   Every panel has a maximize control that opens it fullscreen with the full detail
-   and the underlying calculations. After the initial asset load there are zero
-   server calls.
-6. **Footer** — GitHub, registry links, MIT license, and data attribution.
-
-The code snippets in the interfaces section are drawn from the real public APIs of
-the sibling repos (`sidereon`, `sidereon-python`, `sidereon-c`, `sidereon-ex`,
-`sidereon-wasm`) and live in `src/snippets.ts`.
+1. **Hero** — the live constellation globe, install switcher, and GitHub link.
+2. **Live** — a constellation globe, SPP and RTK positioning, an observer
+   skyplot, an IONEX TEC map, GNSS attitude, and track cleanup. Expand the attitude
+   panel to inspect individual yaw samples.
+3. **Astrodynamics lab** — visibility coverage, conjunction screening, and
+   orbit recovery from three positions.
+4. **Language interfaces** — TLE propagation, SP3 positioning, and broadcast
+   GNSS attitude examples in all six languages.
+5. **Capabilities** — positioning, navigation formats, time and frames, force
+   models, orbit propagation and fitting, and event prediction.
+6. **Validation** — comparisons with published references, including Orekit
+   astrodynamics models, IGS orbit products, and Vallado SGP4 vectors.
+7. **Footer** — GitHub, registry links, MIT license, and data attribution.
 
 ## The live section
 
-Everything below the fold in the live section is the `sidereon` Rust core compiled
-to WebAssembly and executed in the page. The SPP solve loads a real SP3 precise
-ephemeris (CNES/CLS GRG final) and a committed pseudorange fixture and runs the
-engine's least-squares solver in the tab, twice: raw (geometry + satellite clock)
-and corrected (broadcast Klobuchar L1 ionosphere + Saastamoinen troposphere). The
-"NET 0" pill asserts on screen that no network calls happen after load. The
-constellation comes from real CelesTrak element sets propagated by the engine's
-SGP4; ground tracks run through the validated TEME → GCRS → ITRS frame pipeline.
-The IONEX panel renders a real global vertical-TEC field and a representative slant
-delay; it is a standalone exhibit and is not fed into the SPP solve.
+After the initial asset load there are zero server calls. The SPP panel solves from ABMF pseudoranges and broadcast navigation records.
+The correction selector enables broadcast Klobuchar ionosphere and Saastamoinen
+troposphere corrections. The constellation uses CelesTrak element sets, and its
+ground tracks follow the TEME → GCRS → ITRS frame pipeline. The IONEX panel shows
+vertical TEC and a representative slant delay.
+
+The GNSS attitude panel shows yaw, nominal yaw, and Sun elevation for one GPS
+satellite on 2026-06-24 UTC, with the active yaw mode marked along the time axis.
+The ABMF navigation file covers part of the day. The panel extrapolates one
+broadcast fit per satellite across the day and uses the default TDB Earth
+orientation for the trajectory. The expanded view lists UTC and TDB epochs,
+yaw, nominal yaw, Sun elevation, and mode.
 
 ## Bundled real data
 
-All inputs live in `public/data/` and are the exact bytes the engine consumes.
+The panels use data bundled with the site.
 The scheduled `refresh-tle` workflow (twice daily) is the only thing that talks
 to the providers: CelesTrak group files, with a per-group Space-Track (18 SDS)
 fallback that keeps the CelesTrak name lines, a 2-hour guard so no group is
@@ -69,8 +60,8 @@ refresh under the same 2-hour guard.
 
 | File | What it is |
 | --- | --- |
-| `GRG0MGXFIN_20201760000_01D_15M_ORB.SP3` | CNES/CLS GRG final multi-GNSS precise orbits, 2020 DOY 176, 15-min. |
-| `spp_fixture.json` | SPP trace fixture: 30 GPS L1 pseudoranges, fixed receiver truth, Klobuchar + surface-met fields, full iteration trace. |
+| `abmf_obs.rnx` | IGS ABMF RINEX observations for the SPP exhibit. |
+| `abmf_nav.rnx` | IGS ABMF RINEX navigation records from 2026-06-24 for SPP and GNSS attitude. |
 | `global.ionex` | A global IONEX vertical-TEC map (AIUB/CODE). |
 | `gps-ops.tle`, `galileo.tle`, `glo-ops.tle`, `beidou.tle` | Real CelesTrak element sets. |
 | `land110.json` | Natural Earth land polygons for coastlines. |
@@ -82,9 +73,9 @@ Requires Node `^20.19.0 || >=22.12.0` and the published
 
 ```
 npm install
-npm run dev       # vite dev server at http://localhost:5173
-npm run build     # refresh data, then production build to dist/
-npm run preview   # serve the production build
+npm run dev
+npm run build
+npm run preview
 ```
 
 `scripts/shoot.mjs` drives Playwright to capture the section screenshots under

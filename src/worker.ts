@@ -26,6 +26,7 @@ import {
 } from "@neilberkman/sidereon";
 import { initEngine, parseTleFile, llToEcefUnit, EARTH_RADIUS_KM, type VisibleSat } from "./engine";
 import type { Constellation } from "./colors";
+import { sampleAttitudeDay } from "./attitude";
 
 // km -> scene units, IDENTICAL to globe.ts (Earth radius = 1). The constellation
 // dot positions and comet trails this worker computes are uploaded straight into
@@ -140,6 +141,7 @@ interface SatMeta {
 }
 
 let fleet: Fleet | null = null;
+let attitudeNav: Uint8Array | null = null;
 let tleLinesByIndex: [string, string][] = [];
 let meta: SatMeta[] = [];
 // Catalog number -> fleet index, so `Constellation.visible` results (keyed by the
@@ -343,6 +345,15 @@ const api = {
     tleLinesByIndex = parsed.map((s) => s.tle.toLines() as [string, string]);
     fleet = new Fleet(parsed.map((s) => s.tle)); // consumes the Tle handles
     return fleet.satelliteCount;
+  },
+
+  initAttitude(nav: Uint8Array): void {
+    attitudeNav = nav;
+  },
+
+  attitudeDay(satellite: string) {
+    if (!attitudeNav) throw new Error("Broadcast navigation data unavailable.");
+    return sampleAttitudeDay(attitudeNav, satellite);
   },
 
   // A global coverage raster at one epoch: how many constellation satellites are
